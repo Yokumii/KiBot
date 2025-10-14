@@ -1,3 +1,5 @@
+import os
+
 import httpx
 
 from infra.logger import Logger
@@ -18,7 +20,8 @@ class NapCatHttpClient:
         return data["data"]
 
     def get_login_info_sync(self):
-        with httpx.Client(base_url=str(self._client.base_url), headers={'Authorization': f'Bearer {self._auth_token}'}) as client:
+        with httpx.Client(base_url=str(self._client.base_url),
+                          headers={'Authorization': f'Bearer {self._auth_token}'}) as client:
             r = client.post("/get_login_info", json={})
             r.raise_for_status()
             data = r.json()
@@ -33,4 +36,19 @@ class NapCatHttpClient:
             "message": msg
         }
         Logger.info("Message sent", msg)
+        await self._client.post(api, json=payload)
+
+    async def send_group_image_msg(self, group_id: int, img_path: str):
+        abs_img_path = os.path.abspath(img_path)
+        api = "/send_group_msg"
+        payload = {
+            "group_id": group_id,
+            "message": {
+                "type": "image",
+                "data": {
+                    "file": abs_img_path
+                }
+            }
+        }
+        Logger.info("Image sent", f"image: {abs_img_path}")
         await self._client.post(api, json=payload)
