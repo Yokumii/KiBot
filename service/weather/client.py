@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Tuple
 
 import httpx
 
@@ -114,7 +114,7 @@ class QWeatherClient:
         active = [s for s in storms if s.isActive == "1"]
         return active if active else None
 
-    async def get_now_storm_info(self, storm_id: str) -> Optional[StormInfo]:
+    async def get_now_storm_info(self, storm_id: str) -> Optional[Tuple[Optional[StormInfo], list[StormInfo]]]:
         url = f"https://{self.api_host}/v7/tropical/storm-track"
         params = {"stormid": storm_id}
         try:
@@ -122,8 +122,20 @@ class QWeatherClient:
         except httpx.TimeoutException:
             logger.warn("Weather", f"Storm Id [{storm_id}] Get Storm Info Timeout")
             return None
+
+        storm_now: Optional[StormInfo] = None
+        historical_tracks = []
         data = resp.json()
-        if data.get("code") == "200" and data.get("now"):
-            storm_now = data["now"]
-            return StormInfo(**storm_now)
+        if data.get("code") == "200":
+            if data.get("now"):
+                storm_now = StormInfo(**data["now"])
+            if data.get("track") and isinstance(data["track"], list):
+                historical_tracks = [
+                    StormInfo(
+                        **track_item,
+                        pubTime=track_item["time"]
+                    )
+                    for track_item in data["track"]
+                ]
+            return storm_now, historical_tracks
         return None

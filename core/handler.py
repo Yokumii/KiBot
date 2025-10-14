@@ -1,13 +1,15 @@
+import asyncio
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from adapter.napcat.http_api import NapCatHttpClient
-from core.pusher.weather_scheduler import WeatherScheduler
-from infra.logger import logger
-from service.llm.chat import LLMService
-from service.weather.service import WeatherService
-from service.bangumi.service import BangumiService
 from core.pusher.bangumi_scheduler import BangumiScheduler
 from core.pusher.bilibili_scheduler import BilibiliScheduler
+from core.pusher.weather_scheduler import WeatherScheduler
+from infra.logger import logger
+from service.bangumi.service import BangumiService
+from service.llm.chat import LLMService
+from service.weather.service import WeatherService
 
 
 class Handler:
@@ -76,7 +78,7 @@ class Handler:
 
             lines = []
             for idx, item in enumerate(storm_resp, 1):
-                s, info = item.storm, item.stormInfo
+                s, info = item[0].storm, item[0].stormInfo
                 storm_id = parse_serial(s.id)
                 # 如果move360为空，则省略括号部分
                 move_dir = f"{info.moveDir}" if not info.move360 else f"{info.moveDir}({info.move360}°)"
@@ -89,6 +91,37 @@ class Handler:
                     f"   移速：{info.moveSpeed} m/s {move_dir}"
                 )
             reply = f"🌀 当前西北太平洋共有{len(storm_resp)}个活跃台风\n" + "\n".join(lines)
+            await self.client.send_group_msg(group_id, reply)
+
+            # 绘制台风路径图
+            await self.client.send_group_msg(group_id, "希酱正在努力绘制台风路径图，请稍等哦~")
+
+            executor = ThreadPoolExecutor(max_workers=2)
+
+            def _render_sync(storm_data) -> str | None:
+                try:
+                    return self.weather_svc.render_storm(storm_data)
+                except Exception as e:
+                    logger.error("Weather", f"绘制台风路径时出现错误：{e}")
+                    return None
+
+            futures = [
+                asyncio.get_running_loop().run_in_executor(executor, _render_sync, single_storm)
+                for single_storm in storm_resp
+            ]
+
+            img_paths = await asyncio.gather(*futures)
+
+            for single_storm, img_path in zip(storm_resp, img_paths):
+                typhoon_name = single_storm[0].storm.name
+                img_path = await asyncio.get_running_loop().run_in_executor(executor, _render_sync, single_storm)
+                if img_path:
+                    logger.info("Weather", f"台风「{typhoon_name}」路径已绘制，保存于{img_path}")
+                    await self.client.send_group_image_msg(group_id, img_path)
+                else:
+                    logger.warn("Weather", f"台风「{typhoon_name}」路径绘制失败")
+
+            return
         elif parts[0] == "订阅":
             if len(parts) == 1 or not parts[1].strip():
                 await self.client.send_group_msg(group_id, default_msg + "请指定城市，例如：/天气 订阅 北京")
@@ -232,7 +265,8 @@ class Handler:
             return
         
         self.bilibili_scheduler.subscribe(str(group_id), up_uid)
-        await self.client.send_group_msg(group_id, f"✅ 本群已订阅UP主 {up_uid} 的动态推送！\n每5分钟会自动检查新动态并推送。")
+        await self.client.send_group_msg(group_id,
+                                         f"✅ 本群已订阅UP主 {up_uid} 的动态推送！\n每5分钟会自动检查新动态并推送。")
 
     async def _handle_bilibili_unsubscribe(self, group_id, up_uid: str):
         """处理取消订阅UP主动态推送"""

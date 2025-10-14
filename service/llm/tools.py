@@ -302,7 +302,7 @@ async def get_active_storms() -> str:
     weather_service = WeatherService()
     try:
         # 调用天气服务获取活跃热带风暴列表
-        storm_responses: Optional[List[StormResponse]] = await weather_service.get_storm()
+        storm_responses: Optional[List[List[StormResponse]]] = await weather_service.get_storm()
 
         if not storm_responses:
             return "当前西北太平洋没有活跃的台风/热带风暴信息"
@@ -310,8 +310,8 @@ async def get_active_storms() -> str:
         result = ["当前活跃台风/热带风暴信息：\n"]
 
         for idx, storm_resp in enumerate(storm_responses, 1):
-            storm: StormItem = storm_resp.storm
-            info: StormInfo = storm_resp.stormInfo
+            storm: StormItem = storm_resp[0].storm
+            info: StormInfo = storm_resp[0].stormInfo
 
             # 风暴类型映射
             storm_type_map = {
