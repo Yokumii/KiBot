@@ -34,7 +34,7 @@ class ToolManager:
             "memory_query": Tool(
                 name="memory_query",
                 description="查询机器人个人长期记忆（daily_memory.txt）中的历史记录，当用户问“我以前说过/记过/提到过…”时,"
-                            "或用户消息可能涉及到对话历史时、时间点时使用",
+                            "或用户消息可能涉及到对话历史时、时间点时使用，但如果只涉及刚刚发生或是当天的事情，无需调用",
                 parameters={
                     "type": "object",
                     "properties": {

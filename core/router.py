@@ -24,7 +24,7 @@ class Router:
             bilibili_cmd = re.sub(r'^/b站\s?', '', cleaned_msg).strip()
             await handler.bilibili_handler(message.group_id, bilibili_cmd)
         elif cleaned_msg.startswith(("/帮助", "/help")):
-            help_cmd = re.sub(r'^/help\s?', '', cleaned_msg).strip()
+            help_cmd = re.sub(r'^/(help|帮助)\s?', '', cleaned_msg).strip()
             await handler.help_handler(message.group_id, help_cmd)
         else:
             await handler.reply_handler(message.group_id, cleaned_msg, message.user_id)

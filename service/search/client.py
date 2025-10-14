@@ -32,7 +32,7 @@ class SearchClient:
 
         if response.status_code != 200:
             logger.warn("Web Search", f"Search Request failed. Code: "
-                                      f"{response.status_code} Message: {response.json().get("msg")}")
+                                      f"{response.status_code} Message: {response.json().get('msg')}")
             return None
 
         data = response.json()
