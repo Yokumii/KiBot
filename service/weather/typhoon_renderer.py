@@ -1,13 +1,17 @@
 import datetime
+import gc
 import io
 import os
 import platform
+import threading
 from enum import Enum
 from pathlib import Path
 from typing import Tuple, List, Dict
 
 import numpy as np
 from PIL import Image
+import matplotlib
+matplotlib.use('Agg')
 from matplotlib import font_manager as fm
 from matplotlib import lines as mpl_lines
 from matplotlib import patches as mpl_patches
@@ -35,10 +39,10 @@ STORM_TYPE_CN = {
 }
 
 DIR_DEG = {
-        'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5,
-        'E': 90, 'ESE': 112.5, 'SE': 135, 'SSE': 157.5,
-        'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5,
-        'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5
+    'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5,
+    'E': 90, 'ESE': 112.5, 'SE': 135, 'SSE': 157.5,
+    'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5,
+    'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5
 }
 
 
@@ -48,7 +52,24 @@ class TyphoonScope(Enum):
 
 
 class TyphoonRenderer:
+    _instance = None
+    _lock = None
+
+    def __new__(cls, *args, **kwargs):
+        if cls._lock is None:
+            cls._lock = threading.Lock()
+
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+
+        return cls._instance
+
     def __init__(self):
+        if hasattr(self, '_initialized'):
+            return
+
         cur_dir = os.path.dirname(__file__)
         self.base_image: np.ndarray = plt.imread(os.path.join(cur_dir, 'resources', 'ne_base.png'))
         self.base_image_large: np.ndarray = plt.imread(os.path.join(cur_dir, 'resources', 'ne_base_large.png'))
@@ -59,6 +80,8 @@ class TyphoonRenderer:
         self.aspect_large = ((self.extent_large[1] - self.extent_large[0]) /
                              (self.extent_large[3] - self.extent_large[2]))
         self.dpi = 800
+
+        self._initialized = True
 
     def render(self, storm_data: List[StormResponse]) -> Image:
         self._set_font()
@@ -109,12 +132,15 @@ class TyphoonRenderer:
         # 将图像输出至缓冲区
         buffer = io.BytesIO()
         fig.savefig(buffer, format='png', dpi=self.dpi, bbox_inches='tight', pad_inches=0.1)
+        fig.clear()
         plt.close(fig)
         buffer.seek(0)
 
         img_origin = Image.open(buffer)
         img_copy = img_origin.copy()
         buffer.close()
+
+        gc.collect()
 
         return img_copy
 
