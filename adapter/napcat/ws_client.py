@@ -1,5 +1,7 @@
 import asyncio
 import json
+import traceback
+
 import websockets
 from typing import Awaitable, Callable
 
@@ -24,7 +26,9 @@ class NapCatWsClient:
                     async for raw in ws:
                         await self._dispatch(raw)
             except Exception as e:
-                Logger.warn("WebSocket", f"Exception: {e} Trying to reconnect...")
+                Logger.warn("WebSocket", f"Exception: {e}\n"
+                                         f"{traceback.format_exc()} \n"
+                                         f"Trying to reconnect...")
                 await asyncio.sleep(5)
 
     async def _dispatch(self, raw: str):
