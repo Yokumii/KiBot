@@ -114,7 +114,6 @@ class Handler:
 
             for single_storm, img_path in zip(storm_resp, img_paths):
                 typhoon_name = single_storm[0].storm.name
-                img_path = await asyncio.get_running_loop().run_in_executor(executor, _render_sync, single_storm)
                 if img_path:
                     logger.info("Weather", f"台风「{typhoon_name}」路径已绘制，保存于{img_path}")
                     await self.client.send_group_image_msg(group_id, img_path)
