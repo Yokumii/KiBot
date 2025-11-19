@@ -4,6 +4,8 @@ NapCat Webhook 服务器模块
 接收 NapCat 通过 HTTP POST 推送的事件，并分发给对应的 handler 处理。
 """
 import asyncio
+import hmac
+import hashlib
 from typing import Optional, Callable, Awaitable
 
 from fastapi import FastAPI, Request, HTTPException, Header
@@ -46,29 +48,63 @@ class WebhookServer:
         @self.app.post("/webhook")
         async def handle_webhook(
             request: Request,
-            authorization: Optional[str] = Header(None)
+            authorization: Optional[str] = Header(None),
+            x_signature: Optional[str] = Header(None)
         ):
             """
             处理 NapCat HTTP POST 事件上报
 
             NapCat 会将所有事件通过 HTTP POST 发送到这个端点。
             事件格式遵循 OneBot 11 标准。
+
+            支持两种验证方式：
+            1. Authorization header (Bearer token 或直接 token)
+            2. X-Signature header (HMAC-SHA1 签名)
             """
-            # 验证 token（如果配置了的话）
+            # 获取请求体（用于签名验证）
+            body_bytes = await request.body()
+
+            # 验证请求（如果配置了 secret）
             if self.secret_token:
-                if not authorization:
-                    Logger.warn("WebhookServer", "Missing Authorization header")
-                    raise HTTPException(status_code=403, detail="Missing authorization header")
+                verified = False
 
-                # NapCat 使用 Bearer token 格式
-                if authorization.startswith("Bearer "):
-                    token = authorization[7:]
-                else:
-                    token = authorization
+                # 方式 1: 检查 X-Signature header (NapCat 默认使用此方式)
+                if x_signature:
+                    # NapCat 使用 HMAC-SHA1 签名
+                    # 格式: sha1=<signature>
+                    if x_signature.startswith("sha1="):
+                        expected_signature = x_signature[5:]
+                        # 计算 HMAC-SHA1
+                        computed_signature = hmac.new(
+                            self.secret_token.encode('utf-8'),
+                            body_bytes,
+                            hashlib.sha1
+                        ).hexdigest()
 
-                if token != self.secret_token:
-                    Logger.warn("WebhookServer", "Invalid token")
-                    raise HTTPException(status_code=403, detail="Invalid token")
+                        if hmac.compare_digest(computed_signature, expected_signature):
+                            verified = True
+                            Logger.debug("WebhookServer", "Request verified via X-Signature")
+                        else:
+                            Logger.warn("WebhookServer",
+                                       f"Invalid signature. Expected: {computed_signature}, Got: {expected_signature}")
+
+                # 方式 2: 检查 Authorization header (兼容模式)
+                elif authorization:
+                    # 支持 Bearer token 或直接 token
+                    if authorization.startswith("Bearer "):
+                        token = authorization[7:]
+                    else:
+                        token = authorization
+
+                    if token == self.secret_token:
+                        verified = True
+                        Logger.debug("WebhookServer", "Request verified via Authorization header")
+
+                # 如果两种方式都没有通过验证
+                if not verified:
+                    Logger.warn("WebhookServer",
+                               f"Authentication failed. X-Signature: {bool(x_signature)}, Authorization: {bool(authorization)}")
+                    raise HTTPException(status_code=403, detail="Authentication failed")
 
             # 解析请求体
             try:
