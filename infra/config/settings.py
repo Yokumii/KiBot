@@ -7,10 +7,18 @@ class Settings(BaseSettings):
     )
 
     # NapCat 网络配置
+    # WebSocket 配置（已废弃，保留用于兼容）
     NAPCAT_WS: str = "ws://127.0.0.1:3001"
     NAPCAT_WS_AUTH_TOKEN: str = "<Token>"
+
+    # HTTP API 配置（用于调用 NapCat API）
     NAPCAT_HTTP: str = "http://127.0.0.1:3000"
     NAPCAT_HTTP_AUTH_TOKEN: str = "<Token>"
+
+    # Webhook 配置（用于接收 NapCat 事件推送）
+    NAPCAT_WEBHOOK_SECRET: str = ""  # Webhook 验证密钥，应与 NapCat 配置的 token 一致
+    WEBHOOK_HOST: str = "0.0.0.0"    # Webhook 服务器监听地址
+    WEBHOOK_PORT: int = 8000         # Webhook 服务器监听端口
 
     # LLM 相关配置
     LLM_BASE_URL: str = "<BASE_URL>"
