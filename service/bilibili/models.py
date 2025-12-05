@@ -45,7 +45,7 @@ class BiliCookie(BaseModel):
 # https://socialsisteryi.github.io/bilibili-API-collect/docs/dynamic/all.html#%E8%8E%B7%E5%8F%96%E5%85%A8%E9%83%A8%E5%8A%A8%E6%80%81%E5%88%97%E8%A1%A8
 # 二编，获取动态所使用的API针对部分类型的动态返回的动态内容并不全，所以下面的数据模型基本没用，留着以后再完善吧
 class DynamicResponse(BaseModel):
-    """动态列表响应"""
+    """动态响应（支持列表和详情两种格式）"""
     code: int
     message: str
     ttl: int
@@ -53,12 +53,15 @@ class DynamicResponse(BaseModel):
 
 
 class DynamicData(BaseModel):
-    """动态数据"""
-    has_more: bool
-    items: List['DynamicItem']
-    offset: str
-    update_baseline: str
-    update_num: int
+    """动态数据（支持列表和详情两种格式）"""
+    # 列表格式字段
+    has_more: Optional[bool] = None
+    items: Optional[List['DynamicItem']] = None
+    offset: Optional[str] = None
+    update_baseline: Optional[str] = None
+    update_num: Optional[int] = None
+    # 详情格式字段
+    item: Optional['DynamicItem'] = None
 
 
 class DynamicItem(BaseModel):
@@ -366,7 +369,7 @@ class UserInfo(BaseModel):
     jointime: int
     moral: int
     silence: int
-    coins: int
+    coins: float  # API可能返回浮点数，如1457.4
     fans_badge: bool
     official: Optional[Dict[str, Any]] = None
     vip: Optional[Dict[str, Any]] = None

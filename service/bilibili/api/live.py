@@ -2,6 +2,7 @@
 直播API封装
 """
 from typing import Optional
+from pydantic import ValidationError
 from ..client import BiliClient
 from ..models import LiveRoomInfoResponse, LiveInfoResponse
 
@@ -86,6 +87,10 @@ class LiveAPI:
             )
             data = response.json()
             return LiveInfoResponse(**data)
+        except ValidationError as e:
+            from infra.logger import logger
+            logger.warn("LiveAPI", f"获取直播详情失败: 数据验证错误 - {e}")
+            return None
         except Exception as e:
             from infra.logger import logger
             logger.warn("LiveAPI", f"获取直播详情失败: {e}")

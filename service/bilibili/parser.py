@@ -143,7 +143,7 @@ class BilibiliParser:
             格式化后的消息
         """
         try:
-            cookies = await self._get_cookies() if self.get_cookies else None
+            cookies = (await self._get_cookies()) if self.get_cookies else None
             response = await self.video_api.get_video_info(aid=aid, bvid=bvid, cookies=cookies)
             
             if not response or not response.data:
@@ -167,13 +167,17 @@ class BilibiliParser:
             格式化后的消息
         """
         try:
-            cookies = await self._get_cookies() if self.get_cookies else None
+            cookies = (await self._get_cookies()) if self.get_cookies else None
             response = await self.dynamic_api.get_dynamic_detail(dynamic_id, cookies=cookies)
             
-            if not response or not response.data or not response.data.items:
+            if not response or not response.data:
                 return None
             
-            item = response.data.items[0]
+            # 详情API返回 item 字段，列表API返回 items 字段
+            item = response.data.item if response.data.item else (response.data.items[0] if response.data.items else None)
+            if not item:
+                return None
+            
             author = item.modules.module_author
             dynamic = item.modules.module_dynamic
             
@@ -219,7 +223,7 @@ class BilibiliParser:
             格式化后的消息
         """
         try:
-            cookies = await self._get_cookies() if self.get_cookies else None
+            cookies = (await self._get_cookies()) if self.get_cookies else None
             response = await self.user_api.get_user_info(uid, cookies=cookies)
             
             if not response or not response.data:

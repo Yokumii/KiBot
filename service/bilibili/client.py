@@ -294,7 +294,7 @@ class BiliClient:
             "POST", url, api_type=api_type,
             params=params, data=data, cookies=cookies, headers=headers, **kwargs
         )
-    
+
     @staticmethod
     def extract_cookies_from_url(url: str) -> Optional[Dict[str, str]]:
         """
@@ -307,14 +307,14 @@ class BiliClient:
         try:
             parsed_url = urlparse(url)
             query_params = parse_qs(parsed_url.query)
-            
+
             cookie_dict = {
                 'DedeUserID': query_params.get('DedeUserID', [''])[0],
                 'DedeUserID__ckMd5': query_params.get('DedeUserID__ckMd5', [''])[0],
                 'SESSDATA': query_params.get('SESSDATA', [''])[0],
                 'bili_jct': query_params.get('bili_jct', [''])[0]
             }
-            
+
             # 验证所有必需的cookie字段是否存在且不为空
             if all(cookie_dict.values()):
                 return cookie_dict
@@ -324,7 +324,7 @@ class BiliClient:
         except Exception as e:
             logger.warn("BiliClient", f"从URL解析Cookie失败: {e}")
             return None
-    
+
     async def close(self):
         """关闭所有客户端"""
         for client in self.clients:
