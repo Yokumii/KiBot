@@ -3,7 +3,8 @@ B站链接自动解析器
 参考 bilibili-helper 的正则表达式
 """
 import re
-from typing import Optional, Tuple, Dict, Any, Callable, Awaitable
+import inspect
+from typing import Optional, Tuple, Dict, Any, Callable, Awaitable, Union
 from urllib.parse import urlparse
 
 from infra.logger import logger
@@ -20,15 +21,19 @@ class BilibiliParser:
     
     # 正则表达式模式
     VIDEO_REGEX = re.compile(r"(?i)(?<!\w)(?:av(\d+)|(BV1[1-9A-NP-Za-km-z]{9}))")
-    DYNAMIC_REGEX = re.compile(r"(?<=t\.bilibili\.com/(?:h5/dynamic/detail/)?)(\d+)")
-    ROOM_REGEX = re.compile(r"(?<=live\.bilibili\.com/(?:h5/)?)(\d+)")
-    SPACE_REGEX = re.compile(r"(?<=space\.bilibili\.com/|bilibili\.com/space/)(\d+)")
+    # 动态链接：t.bilibili.com/xxx 或 t.bilibili.com/h5/dynamic/detail/xxx
+    DYNAMIC_REGEX = re.compile(r"t\.bilibili\.com/(?:h5/dynamic/detail/)?(\d+)")
+    # 直播间链接：live.bilibili.com/xxx 或 live.bilibili.com/h5/xxx
+    ROOM_REGEX = re.compile(r"live\.bilibili\.com/(?:h5/)?(\d+)")
+    # 用户空间链接：space.bilibili.com/xxx 或 bilibili.com/space/xxx
+    SPACE_REGEX = re.compile(r"(?:space\.bilibili\.com/|bilibili\.com/space/)(\d+)")
     SEASON_REGEX = re.compile(r"(?i)(?<!\w)ss(\d{4,10})")
     EPISODE_REGEX = re.compile(r"(?i)(?<!\w)ep(\d{4,10})")
     MEDIA_REGEX = re.compile(r"(?i)(?<!\w)md(\d{4,10})")
     ARTICLE_REGEX = re.compile(r"(?i)(?<!\w)cv(\d{4,10})")
-    ARTICLE_URL_REGEX = re.compile(r"(?<=bilibili\.com/read/mobile(?:\?id=|/))(\d+)")
-    SHORT_LINK_REGEX = re.compile(r"(?:b23\.tv|bili2233\.cn)\?/([0-9A-z]+)")
+    # 专栏链接：bilibili.com/read/mobile?id=xxx 或 bilibili.com/read/mobile/xxx
+    ARTICLE_URL_REGEX = re.compile(r"bilibili\.com/read/mobile(?:\?id=|/)(\d+)")
+    SHORT_LINK_REGEX = re.compile(r"(?:b23\.tv|bili2233\.cn)/?([0-9A-z]+)")
     
     def __init__(
         self,
@@ -37,7 +42,10 @@ class BilibiliParser:
         live_api: LiveAPI,
         season_api: SeasonAPI,
         user_api: UserAPI,
-        get_cookies: Optional[Callable[[], Awaitable[Optional[BiliCookie]]]] = None
+        get_cookies: Optional[Union[
+            Callable[[], Optional[BiliCookie]],  # 同步函数
+            Callable[[], Awaitable[Optional[BiliCookie]]]  # 异步函数
+        ]] = None
     ):
         """
         初始化解析器
@@ -55,6 +63,20 @@ class BilibiliParser:
         self.season_api = season_api
         self.user_api = user_api
         self.get_cookies = get_cookies
+    
+    async def _get_cookies(self) -> Optional[BiliCookie]:
+        """
+        内部方法：获取Cookie，支持同步和异步函数
+        """
+        if not self.get_cookies:
+            return None
+        
+        # 检查是否是协程函数
+        if inspect.iscoroutinefunction(self.get_cookies):
+            return await self.get_cookies()
+        else:
+            # 同步函数，直接调用
+            return self.get_cookies()
     
     def find_links(self, text: str) -> list[Tuple[str, str, str]]:
         """
@@ -76,15 +98,15 @@ class BilibiliParser:
         
         # 动态
         for match in self.DYNAMIC_REGEX.finditer(text):
-            links.append(("dynamic", match.group(1), match.group()))
+            links.append(("dynamic", match.group(1), match.group(0)))
         
         # 直播间
         for match in self.ROOM_REGEX.finditer(text):
-            links.append(("live", match.group(1), match.group()))
+            links.append(("live", match.group(1), match.group(0)))
         
         # 用户空间
         for match in self.SPACE_REGEX.finditer(text):
-            links.append(("user", match.group(1), match.group()))
+            links.append(("user", match.group(1), match.group(0)))
         
         # 剧集
         for match in self.SEASON_REGEX.finditer(text):
@@ -103,11 +125,11 @@ class BilibiliParser:
             links.append(("article", match.group(1), match.group()))
         
         for match in self.ARTICLE_URL_REGEX.finditer(text):
-            links.append(("article", match.group(1), match.group()))
+            links.append(("article", match.group(1), match.group(0)))
         
         # 短链接（需要解析跳转）
         for match in self.SHORT_LINK_REGEX.finditer(text):
-            links.append(("short_link", match.group(1), match.group()))
+            links.append(("short_link", match.group(1), match.group(0)))
         
         return links
     
@@ -121,7 +143,7 @@ class BilibiliParser:
             格式化后的消息
         """
         try:
-            cookies = await self.get_cookies() if self.get_cookies else None
+            cookies = await self._get_cookies() if self.get_cookies else None
             response = await self.video_api.get_video_info(aid=aid, bvid=bvid, cookies=cookies)
             
             if not response or not response.data:
@@ -145,7 +167,7 @@ class BilibiliParser:
             格式化后的消息
         """
         try:
-            cookies = await self.get_cookies() if self.get_cookies else None
+            cookies = await self._get_cookies() if self.get_cookies else None
             response = await self.dynamic_api.get_dynamic_detail(dynamic_id, cookies=cookies)
             
             if not response or not response.data or not response.data.items:
@@ -197,7 +219,7 @@ class BilibiliParser:
             格式化后的消息
         """
         try:
-            cookies = await self.get_cookies() if self.get_cookies else None
+            cookies = await self._get_cookies() if self.get_cookies else None
             response = await self.user_api.get_user_info(uid, cookies=cookies)
             
             if not response or not response.data:

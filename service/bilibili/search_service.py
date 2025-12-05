@@ -1,7 +1,8 @@
 """
 B站搜索服务
 """
-from typing import Optional, List, Dict, Any, Callable, Awaitable
+import inspect
+from typing import Optional, List, Dict, Any, Callable, Awaitable, Union
 
 from infra.logger import logger
 from .api.search import SearchAPI
@@ -20,7 +21,10 @@ class BilibiliSearchService:
         user_api: UserAPI,
         season_api: SeasonAPI,
         video_api: VideoAPI,
-        get_cookies: Optional[Callable[[], Awaitable[Optional[BiliCookie]]]] = None
+        get_cookies: Optional[Union[
+            Callable[[], Optional[BiliCookie]],  # 同步函数
+            Callable[[], Awaitable[Optional[BiliCookie]]]  # 异步函数
+        ]] = None
     ):
         """
         初始化搜索服务
