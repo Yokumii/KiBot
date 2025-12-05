@@ -21,14 +21,20 @@ class TemplateType(Enum):
 class TemplateManager:
     """模板管理器"""
     
-    def __init__(self, template_dir: str = "templates/bilibili"):
+    def __init__(self, template_dir: Optional[str] = None):
         """
         初始化模板管理器
         Args:
-            template_dir: 模板文件目录
+            template_dir: 模板文件目录（如果为None则使用默认值）
         """
+        if template_dir is None:
+            template_dir = "templates/bilibili"
         self.template_dir = Path(template_dir)
-        self.template_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.template_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.warn("TemplateManager", f"创建模板目录失败: {e}")
+            self.template_dir = None
         self._templates: Dict[TemplateType, str] = {}
         self._load_templates()
     
@@ -67,25 +73,41 @@ class TemplateManager:
             )
         }
         
+        # 确保 template_dir 是有效的 Path 对象
+        if self.template_dir is None:
+            logger.error("TemplateManager", "template_dir 不能为 None")
+            # 使用默认模板，不保存到文件
+            for template_type in TemplateType:
+                self._templates[template_type] = default_templates[template_type]
+            return
+        
         # 尝试从文件加载，如果不存在则使用默认模板
         for template_type in TemplateType:
-            template_file = self.template_dir / f"{template_type.value}.txt"
-            if template_file.exists():
-                try:
-                    with open(template_file, "r", encoding="utf-8") as f:
-                        self._templates[template_type] = f.read().strip()
-                except Exception as e:
-                    logger.warn("TemplateManager", f"加载模板 {template_type.value} 失败: {e}")
+            try:
+                template_file = self.template_dir / f"{template_type.value}.txt"
+                if template_file.exists() and template_file.is_file():
+                    try:
+                        with open(template_file, "r", encoding="utf-8") as f:
+                            self._templates[template_type] = f.read().strip()
+                    except Exception as e:
+                        logger.warn("TemplateManager", f"加载模板 {template_type.value} 失败: {e}")
+                        self._templates[template_type] = default_templates[template_type]
+                else:
+                    # 使用默认模板并保存到文件
                     self._templates[template_type] = default_templates[template_type]
-            else:
-                # 使用默认模板并保存到文件
+                    self._save_template(template_type, default_templates[template_type])
+            except Exception as e:
+                logger.warn("TemplateManager", f"处理模板 {template_type.value} 时出错: {e}")
                 self._templates[template_type] = default_templates[template_type]
-                self._save_template(template_type, default_templates[template_type])
     
     def _save_template(self, template_type: TemplateType, content: str):
         """保存模板到文件"""
-        template_file = self.template_dir / f"{template_type.value}.txt"
+        if self.template_dir is None:
+            logger.warn("TemplateManager", f"无法保存模板 {template_type.value}，template_dir 为 None")
+            return
+        
         try:
+            template_file = self.template_dir / f"{template_type.value}.txt"
             with open(template_file, "w", encoding="utf-8") as f:
                 f.write(content)
         except Exception as e:
@@ -121,7 +143,7 @@ def get_template_manager(template_dir: Optional[str] = None) -> TemplateManager:
     """获取模板管理器实例"""
     global _template_manager
     if _template_manager is None:
-        _template_manager = TemplateManager(template_dir)
+        _template_manager = TemplateManager(template_dir or "templates/bilibili")
     return _template_manager
 
 
