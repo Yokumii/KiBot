@@ -136,13 +136,37 @@ class TemplateEngine:
         Returns:
             渲染后的消息
         """
+        # 使用辅助方法获取数据（兼容新旧API格式）
+        if hasattr(user_info, "get_fans"):
+            fans = user_info.get_fans()
+            following = user_info.get_following()
+            name = user_info.get_name()
+            sign = user_info.get_sign()
+            mid = user_info.get_mid()
+            level = user_info.get_level()
+        else:
+            # 兼容旧格式
+            fans = getattr(user_info, "fans", 0) or getattr(user_info, "follower", 0)
+            following = getattr(user_info, "following", 0)
+            if isinstance(following, bool):
+                # 如果following是bool类型，尝试从card获取
+                card = getattr(user_info, "card", None)
+                if card:
+                    following = getattr(card, "friend", 0) or getattr(card, "attention", 0)
+                else:
+                    following = 0
+            name = getattr(user_info, "name", "未知")
+            sign = getattr(user_info, "sign", "这个人很懒，什么都没有留下")
+            mid = getattr(user_info, "mid", 0)
+            level = getattr(user_info, "level", 0)
+        
         data = {
-            "name": user_info.name,
-            "sign": user_info.sign or "这个人很懒，什么都没有留下",
-            "mid": user_info.mid,
-            "fans": getattr(user_info, "fans", 0),
-            "following": getattr(user_info, "following", 0),
-            "level": user_info.level,
+            "name": name,
+            "sign": sign,
+            "mid": mid,
+            "fans": fans,
+            "following": following,
+            "level": level,
         }
         return TemplateEngine.render(TemplateType.USER, data)
 
