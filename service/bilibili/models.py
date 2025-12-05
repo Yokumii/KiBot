@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # 二维码登录相关模型
@@ -310,26 +310,38 @@ class LiveRoomInfoResponse(BaseModel):
 
 class LiveRoomInfo(BaseModel):
     """直播间信息"""
-    uid: int
-    room_id: int
-    short_id: int
-    attention: int  # 关注数
-    online: int  # 观看人数
-    is_portrait: bool
-    description: str
-    live_status: int  # 0:未开播 1:直播中 2:轮播中
-    area_id: int
-    parent_area_id: int
-    parent_area_name: str
-    old_area_id: int
-    background: str
+    # 基础字段（使用 Field alias 处理驼峰命名）
+    room_status: int = Field(alias="roomStatus")  # 房间状态
+    round_status: int = Field(alias="roundStatus")  # 轮播状态
+    live_status: int = Field(alias="liveStatus")  # 0:未开播 1:直播中 2:轮播中
+    url: str
     title: str
-    user_cover: str
-    keyframe: str
-    is_strict_room: bool
-    live_time: str
-    tags: str
-    area_name: str
+    cover: str
+    online: int  # 观看人数
+    roomid: int  # 房间ID（注意：API返回的是roomid不是room_id）
+    broadcast_type: int = Field(alias="broadcast_type")
+    online_hidden: int = Field(alias="online_hidden")
+    link: Optional[str] = None  # 直播链接（可能很长）
+
+    # room_init API 返回的额外字段（可选）
+    uid: Optional[int] = None
+    room_id: Optional[int] = None  # 注意：有些API返回room_id，有些返回roomid
+    short_id: Optional[int] = None
+    need_p2p: Optional[int] = None
+    is_hidden: Optional[bool] = None
+    is_locked: Optional[bool] = None
+    is_portrait: Optional[bool] = None
+    hidden_till: Optional[int] = None
+    lock_till: Optional[int] = None
+    encrypted: Optional[bool] = None
+    pwd_verified: Optional[bool] = None
+    live_time: Optional[int] = None
+    room_shield: Optional[int] = None
+    is_sp: Optional[int] = None
+    special_type: Optional[int] = None
+
+    class Config:
+        populate_by_name = True  # 允许使用别名和原始字段名
 
 
 class LiveInfoResponse(BaseModel):
@@ -356,91 +368,28 @@ class UserInfoResponse(BaseModel):
     data: Optional['UserInfo'] = None
 
 
-class UserCard(BaseModel):
-    """用户卡片信息（card对象）"""
-    mid: str
+class UserInfo(BaseModel):
+    """用户信息"""
+    mid: int
     name: str
     sex: str
     face: str
+    face_nft: int
     sign: str
-    fans: int  # 粉丝数
-    friend: int  # 关注数
-    attention: int  # 关注数（和friend一样）
-    level_info: Optional[Dict[str, Any]] = None
-    pendant: Optional[Dict[str, Any]] = None
-    nameplate: Optional[Dict[str, Any]] = None
-    Official: Optional[Dict[str, Any]] = None
-    official_verify: Optional[Dict[str, Any]] = None
-    vip: Optional[Dict[str, Any]] = None
-
-
-class UserInfo(BaseModel):
-    """用户信息（data对象）"""
-    card: Optional['UserCard'] = None  # 卡片信息
-    follower: int = 0  # 粉丝数（在data对象中）
-    following: bool = False  # 是否关注此用户
-    archive_count: int = 0  # 用户稿件数
-    article_count: int = 0
-    like_num: int = 0  # 点赞数
-    # 以下字段可能在card中，也可能直接在data中
-    mid: Optional[int] = None
-    name: Optional[str] = None
-    sex: Optional[str] = None
-    face: Optional[str] = None
-    face_nft: Optional[int] = None
-    sign: Optional[str] = None
-    rank: Optional[int] = None
-    level: Optional[int] = None
-    jointime: Optional[int] = None
-    moral: Optional[int] = None
-    silence: Optional[int] = None
-    coins: Optional[float] = None  # API可能返回浮点数，如1457.4
-    fans_badge: Optional[bool] = None
+    rank: int
+    level: int
+    jointime: int
+    moral: int
+    silence: int
+    coins: float  # API可能返回浮点数，如1457.4
+    fans_badge: bool
     official: Optional[Dict[str, Any]] = None
     vip: Optional[Dict[str, Any]] = None
     pendant: Optional[Dict[str, Any]] = None
     nameplate: Optional[Dict[str, Any]] = None
-    is_followed: Optional[bool] = None
-    top_photo: Optional[str] = None
+    is_followed: bool
+    top_photo: str
     live_room: Optional[Dict[str, Any]] = None
-    
-    def get_fans(self) -> int:
-        """获取粉丝数（优先使用card.fans，否则使用follower）"""
-        if self.card and self.card.fans:
-            return self.card.fans
-        return self.follower
-    
-    def get_following(self) -> int:
-        """获取关注数（从card.friend或card.attention）"""
-        if self.card:
-            return self.card.friend or self.card.attention or 0
-        return 0
-    
-    def get_name(self) -> str:
-        """获取用户名（优先使用card.name）"""
-        if self.card and self.card.name:
-            return self.card.name
-        return self.name or "未知"
-    
-    def get_sign(self) -> str:
-        """获取签名（优先使用card.sign）"""
-        if self.card and self.card.sign:
-            return self.card.sign
-        return self.sign or "这个人很懒，什么都没有留下"
-    
-    def get_mid(self) -> int:
-        """获取用户MID（优先使用card.mid）"""
-        if self.card and self.card.mid:
-            return int(self.card.mid)
-        return self.mid or 0
-    
-    def get_level(self) -> int:
-        """获取等级"""
-        if self.level is not None:
-            return self.level
-        if self.card and self.card.level_info:
-            return self.card.level_info.get("current_level", 0)
-        return 0
 
 
 # ==================== 剧集相关模型 ====================
@@ -458,6 +407,7 @@ class SeasonInfo(BaseModel):
     title: str
     cover: str
     evaluate: str
+    total: Optional[int] = None  # 总集数（某些API可能不返回）
     new_ep: Optional[Dict[str, Any]] = None
     episodes: Optional[List['SeasonEpisode']] = None
 
@@ -470,10 +420,11 @@ class SeasonEpisode(BaseModel):
     cover: str
     duration: int
     ep_id: int
-    index: str
+    index: Optional[str] = None  # 索引（部分API不返回此字段）
     long_title: str
     pub_time: int
     title: str
+    id: Optional[int] = None  # 有些API返回id，有些返回ep_id
 
 
 # ==================== 搜索相关模型 ====================
@@ -532,8 +483,6 @@ VideoSearchResult.model_rebuild()
 LiveRoomInfoResponse.model_rebuild()
 LiveInfoResponse.model_rebuild()
 UserInfoResponse.model_rebuild()
-UserCard.model_rebuild()
-UserInfo.model_rebuild()
 SeasonInfoResponse.model_rebuild()
 SearchResponse.model_rebuild()
 NavInfoResponse.model_rebuild()

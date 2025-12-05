@@ -245,7 +245,7 @@ class BiliClient:
                 
                 return response
                 
-            except (httpx.Timeout, httpx.NetworkError) as e:
+            except (httpx.TimeoutException, httpx.NetworkError) as e:
                 last_exception = e
                 if attempt < self.max_retries - 1:
                     wait_time = 2 ** attempt  # 指数退避
