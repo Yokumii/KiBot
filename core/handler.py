@@ -8,6 +8,7 @@ from core.pusher.bilibili_scheduler import BilibiliScheduler
 from core.pusher.weather_scheduler import WeatherScheduler
 from infra.logger import logger
 from service.bangumi.service import BangumiService
+from service.bilibili.service import BiliService
 from service.llm.chat import LLMService
 from service.weather.service import WeatherService
 
@@ -21,6 +22,7 @@ class Handler:
         self.bangumi_svc: BangumiService = BangumiService()
         self.bangumi_scheduler: BangumiScheduler = BangumiScheduler(self.client)
         self.bilibili_scheduler: BilibiliScheduler = BilibiliScheduler(self.client)
+        self.bilibili_svc: BiliService = BiliService()
 
     async def reply_handler(self, group_id, msg, user_id):
         # resp = await self.llm_svc.chat(msg)
@@ -205,22 +207,23 @@ class Handler:
         await self.client.send_group_msg(group_id, "❌ 本群已取消订阅每日番剧推送。")
 
     async def bilibili_handler(self, group_id, msg: str):
-        """统一处理B站订阅相关命令"""
-        default_msg = "B站订阅服务。API服务为 https://socialsisteryi.github.io/bilibili-API-collect/ 项目收集而来的野生 API ，请勿滥用！\n"
+        """统一处理B站相关命令"""
+        default_msg = "B站服务。API服务为 https://socialsisteryi.github.io/bilibili-API-collect/ 项目收集而来的野生 API ，请勿滥用！\n"
         
-        parts = msg.strip().split()
+        parts = msg.strip().split(maxsplit=1)
         if len(parts) == 0:
             await self.client.send_group_msg(group_id, default_msg + "请输入正确的指令，例如：/b站 订阅 123456")
             return
         
         command = parts[0].lower()
+        args = parts[1] if len(parts) > 1 else ""
         
         if command == "订阅":
-            if len(parts) < 2:
+            if not args or not args.strip():
                 await self.client.send_group_msg(group_id, "❌ 请指定UP主UID，例如：/b站 订阅 123456")
                 return
             
-            up_uid = parts[1]
+            up_uid = args.strip().split()[0]
             if not up_uid.isdigit():
                 await self.client.send_group_msg(group_id, "❌ 请输入正确的UP主UID")
                 return
@@ -228,11 +231,11 @@ class Handler:
             await self._handle_bilibili_subscribe(group_id, up_uid)
             
         elif command == "取消订阅":
-            if len(parts) < 2:
+            if not args or not args.strip():
                 await self.client.send_group_msg(group_id, "❌ 请指定UP主UID，例如：/b站 取消订阅 123456")
                 return
             
-            up_uid = parts[1]
+            up_uid = args.strip().split()[0]
             if not up_uid.isdigit():
                 await self.client.send_group_msg(group_id, "❌ 请输入正确的UP主UID")
                 return
@@ -243,63 +246,239 @@ class Handler:
             await self._handle_bilibili_list_subscriptions(group_id)
             
         elif command == "检查":
-            if len(parts) < 2:
+            if not args or not args.strip():
                 await self.client.send_group_msg(group_id, "❌ 请指定UP主UID，例如：/b站 检查 123456")
                 return
             
-            up_uid = parts[1]
+            up_uid = args.strip().split()[0]
             if not up_uid.isdigit():
                 await self.client.send_group_msg(group_id, "❌ 请输入正确的UP主UID")
                 return
             
             await self._handle_bilibili_check_dynamics(group_id, up_uid)
+        
+        elif command == "搜索":
+            if not args or not args.strip():
+                await self.client.send_group_msg(group_id, "❌ 请指定搜索类型和关键词，例如：/b站 搜索 用户 关键词")
+                return
+            
+            await self._handle_bilibili_search(group_id, args.strip())
+        
+        elif command == "信息":
+            if not args or not args.strip():
+                await self.client.send_group_msg(group_id, "❌ 请指定信息类型和ID，例如：/b站 信息 视频 BV1234567890")
+                return
+            
+            await self._handle_bilibili_info(group_id, args.strip())
             
         else:
-            await self.client.send_group_msg(group_id, default_msg + "支持的命令：订阅、取消订阅、查看订阅、检查")
+            await self.client.send_group_msg(group_id, default_msg + "支持的命令：订阅、取消订阅、查看订阅、检查、搜索、信息")
 
     async def _handle_bilibili_subscribe(self, group_id, up_uid: str):
         """处理订阅UP主动态推送"""
-        if self.bilibili_scheduler.is_subscribed(str(group_id), up_uid):
+        from service.bilibili.subscription import TaskType
+        
+        group_id_str = str(group_id)
+        
+        # 检查是否已订阅
+        task = self.bilibili_scheduler.manager.get_task(
+            TaskType.DYNAMIC,
+            target_id=up_uid,
+            group_id=group_id_str
+        )
+        if task:
             await self.client.send_group_msg(group_id, f"⚠️ 本群已订阅UP主 {up_uid} 的动态推送")
             return
         
-        self.bilibili_scheduler.subscribe(str(group_id), up_uid)
+        # 添加订阅
+        self.bilibili_scheduler.manager.add_subscription(
+            TaskType.DYNAMIC,
+            target_id=up_uid,
+            group_id=group_id_str
+        )
         await self.client.send_group_msg(group_id,
                                          f"✅ 本群已订阅UP主 {up_uid} 的动态推送！\n每5分钟会自动检查新动态并推送。")
 
     async def _handle_bilibili_unsubscribe(self, group_id, up_uid: str):
         """处理取消订阅UP主动态推送"""
-        if not self.bilibili_scheduler.is_subscribed(str(group_id), up_uid):
+        from service.bilibili.subscription import TaskType
+        
+        group_id_str = str(group_id)
+        
+        # 检查是否已订阅
+        task = self.bilibili_scheduler.manager.get_task(
+            TaskType.DYNAMIC,
+            target_id=up_uid,
+            group_id=group_id_str
+        )
+        if not task:
             await self.client.send_group_msg(group_id, f"⚠️ 本群未订阅UP主 {up_uid} 的动态推送")
             return
         
-        self.bilibili_scheduler.unsubscribe(str(group_id), up_uid)
-        await self.client.send_group_msg(group_id, f"❌ 本群已取消订阅UP主 {up_uid} 的动态推送")
+        # 移除订阅
+        success = self.bilibili_scheduler.manager.remove_subscription(
+            TaskType.DYNAMIC,
+            target_id=up_uid,
+            group_id=group_id_str
+        )
+        if success:
+            await self.client.send_group_msg(group_id, f"❌ 本群已取消订阅UP主 {up_uid} 的动态推送")
 
     async def _handle_bilibili_list_subscriptions(self, group_id):
         """处理查看订阅列表"""
-        subscribed_ups = self.bilibili_scheduler.get_subscribed_ups(str(group_id))
+        from service.bilibili.subscription import TaskType
         
-        if not subscribed_ups:
+        group_id_str = str(group_id)
+        tasks = self.bilibili_scheduler.manager.get_tasks_by_group(group_id_str)
+        
+        # 只显示动态类型的订阅
+        dynamic_tasks = [task for task in tasks if task.task_type == TaskType.DYNAMIC]
+        
+        if not dynamic_tasks:
             await self.client.send_group_msg(group_id, "📢 本群暂无订阅的UP主")
             return
         
         reply = "📢 本群订阅的UP主：\n"
-        for up_uid in subscribed_ups:
-            reply += f"• {up_uid}\n"
+        for task in dynamic_tasks:
+            reply += f"• {task.target_id}\n"
         
         await self.client.send_group_msg(group_id, reply)
 
     async def _handle_bilibili_check_dynamics(self, group_id, up_uid: str):
         """处理手动检查UP主动态"""
+        from service.bilibili.subscription import TaskType
+        
         await self.client.send_group_msg(group_id, "🔍 正在检查UP主动态...")
         
         try:
-            result = await self.bilibili_scheduler.send_manual_check(str(group_id), up_uid)
-            await self.client.send_group_msg(group_id, result)
+            group_id_str = str(group_id)
+            task = self.bilibili_scheduler.manager.get_task(
+                TaskType.DYNAMIC,
+                target_id=up_uid,
+                group_id=group_id_str
+            )
+            
+            if not task:
+                await self.client.send_group_msg(group_id, f"❌ 本群未订阅UP主 {up_uid} 的动态推送")
+                return
+            
+            # 手动触发检查任务（临时清除last_item_id以强制检查所有新动态）
+            original_last_item_id = task.last_item_id
+            task.last_item_id = None
+            
+            try:
+                await self.bilibili_scheduler.scheduler._check_dynamic_task(task)
+                await self.client.send_group_msg(group_id, "📢 检查完毕：已发送新动态（如有）")
+            finally:
+                # 如果任务没有被更新，恢复原来的值
+                # 注意：_check_dynamic_task 内部会调用 update_last_check，会自动保存
+                # 如果检查失败没有更新，则恢复原值
+                if task.last_item_id is None and original_last_item_id:
+                    task.last_item_id = original_last_item_id
+                    # 通过更新任务来触发保存
+                    self.bilibili_scheduler.manager.update_last_check(task.task_id, original_last_item_id)
         except Exception as e:
             logger.warn("Handler", f"检查UP主 {up_uid} 动态时出错: {e}")
             await self.client.send_group_msg(group_id, "❌ 检查动态时出现错误")
+    
+    async def _handle_bilibili_search(self, group_id, args: str):
+        """处理B站搜索"""
+        parts = args.split(maxsplit=1)
+        if len(parts) < 2:
+            await self.client.send_group_msg(group_id, "❌ 请指定搜索类型和关键词\n例如：/b站 搜索 用户 关键词")
+            return
+        
+        search_type = parts[0].lower()
+        keyword = parts[1]
+        
+        await self.client.send_group_msg(group_id, f"🔍 正在搜索「{keyword}」...")
+        
+        try:
+            if search_type in ["用户", "user"]:
+                results = await self.bilibili_svc.search_service.search_user(keyword, limit=5)
+                reply = self.bilibili_svc.search_service.format_user_results(results)
+            elif search_type in ["番剧", "bangumi", "bgm"]:
+                results = await self.bilibili_svc.search_service.search_bangumi(keyword, limit=5)
+                reply = self.bilibili_svc.search_service.format_bangumi_results(results)
+            elif search_type in ["视频", "video"]:
+                results = await self.bilibili_svc.search_service.search_video(keyword, limit=5)
+                reply = self.bilibili_svc.search_service.format_video_results(results)
+            else:
+                await self.client.send_group_msg(group_id, "❌ 不支持的搜索类型\n支持的类型：用户、番剧、视频")
+                return
+            
+            await self.client.send_group_msg(group_id, reply)
+        except Exception as e:
+            logger.warn("Handler", f"搜索失败: {e}")
+            await self.client.send_group_msg(group_id, "❌ 搜索时出现错误")
+    
+    async def _handle_bilibili_info(self, group_id, args: str):
+        """处理B站信息查询"""
+        parts = args.split(maxsplit=1)
+        if len(parts) < 2:
+            await self.client.send_group_msg(group_id, "❌ 请指定信息类型和ID\n例如：/b站 信息 视频 BV1234567890")
+            return
+        
+        info_type = parts[0].lower()
+        info_id = parts[1].strip()
+        
+        await self.client.send_group_msg(group_id, f"🔍 正在查询信息...")
+        
+        try:
+            if info_type in ["视频", "video"]:
+                # 判断是aid还是bvid
+                if info_id.startswith("BV"):
+                    message = await self.bilibili_svc.parser.parse_video(bvid=info_id)
+                elif info_id.startswith("av") or info_id.isdigit():
+                    aid = int(info_id.replace("av", ""))
+                    message = await self.bilibili_svc.parser.parse_video(aid=aid)
+                else:
+                    await self.client.send_group_msg(group_id, "❌ 无效的视频ID")
+                    return
+            elif info_type in ["动态", "dynamic"]:
+                message = await self.bilibili_svc.parser.parse_dynamic(info_id)
+            elif info_type in ["直播", "live", "room"]:
+                room_id = int(info_id)
+                message = await self.bilibili_svc.parser.parse_live(room_id)
+            elif info_type in ["用户", "user"]:
+                uid = int(info_id)
+                message = await self.bilibili_svc.parser.parse_user(uid)
+            elif info_type in ["剧集", "season"]:
+                season_id = int(info_id)
+                message = await self.bilibili_svc.parser.parse_season(season_id)
+            else:
+                await self.client.send_group_msg(group_id, "❌ 不支持的信息类型\n支持的类型：视频、动态、直播、用户、剧集")
+                return
+            
+            if message:
+                await self.client.send_group_msg(group_id, message)
+            else:
+                await self.client.send_group_msg(group_id, "❌ 未找到相关信息")
+        except Exception as e:
+            logger.warn("Handler", f"查询信息失败: {e}")
+            await self.client.send_group_msg(group_id, "❌ 查询信息时出现错误")
+    
+    async def parse_bilibili_links(self, group_id, text: str):
+        """自动解析消息中的B站链接"""
+        try:
+            links = self.bilibili_svc.parser.find_links(text)
+            if not links:
+                return
+            
+            # 去重（避免重复解析）
+            seen = set()
+            for link_type, link_id, matched_text in links:
+                key = (link_type, link_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                
+                # 解析链接
+                message = await self.bilibili_svc.parser.parse(link_type, link_id)
+                if message:
+                    await self.client.send_group_msg(group_id, message)
+        except Exception as e:
+            logger.warn("Handler", f"解析B站链接失败: {e}")
 
     async def help_handler(self, group_id, help_cmd: str):
         """处理帮助请求，根据指定的模块返回详细帮助信息"""
@@ -344,6 +523,13 @@ class Handler:
             "/b站 取消订阅 [UP主UID]  → 取消指定UP主动态订阅\n"
             "/b站 查看订阅            → 查看本群订阅的所有UP主\n"
             "/b站 检查 [UP主UID]      → 手动检查指定UP主最新动态\n"
+            "/b站 搜索 [类型] [关键词] → 搜索用户/番剧/视频\n"
+            "   类型：用户、番剧、视频\n"
+            "/b站 信息 [类型] [ID]    → 查询视频/动态/直播/用户/剧集信息\n"
+            "   类型：视频、动态、直播、用户、剧集\n"
+            "\n"
+            "💡 自动解析：消息中包含B站链接时会自动解析并发送信息\n"
+            "   支持：BV号、AV号、动态链接、直播间链接、用户空间链接等\n"
         )
 
         if not help_cmd:

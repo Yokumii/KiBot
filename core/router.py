@@ -11,7 +11,10 @@ class Router:
 
     async def dispatch(self, message: GroupMessage, handler: Handler):
         if not self.should_reply(message):
+            # 即使没有@机器人，也检查是否有B站链接需要自动解析
+            await handler.parse_bilibili_links(message.group_id, message.raw_message)
             return None
+        
         cleaned_msg = self.clean_text(message)
         # 命令分发
         if cleaned_msg.startswith("/天气"):
@@ -27,6 +30,8 @@ class Router:
             help_cmd = re.sub(r'^/(help|帮助)\s?', '', cleaned_msg).strip()
             await handler.help_handler(message.group_id, help_cmd)
         else:
+            # 普通消息也检查B站链接
+            await handler.parse_bilibili_links(message.group_id, message.raw_message)
             await handler.reply_handler(message.group_id, cleaned_msg, message.user_id)
 
     def should_reply(self, msg: GroupMessage) -> bool:

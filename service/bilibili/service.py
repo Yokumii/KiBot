@@ -5,7 +5,16 @@ from typing import Optional, Tuple
 
 from infra.logger import logger
 from .client import BiliClient
-from .models import BiliCookie, DynamicResponse
+from .models import BiliCookie
+from .api.login import LoginAPI
+from .api.dynamic import DynamicAPI
+from .api.video import VideoAPI
+from .api.live import LiveAPI
+from .api.season import SeasonAPI
+from .api.search import SearchAPI
+from .api.user import UserAPI
+from .parser import BilibiliParser
+from .search_service import BilibiliSearchService
 from .utils.cookie_refresher import CookieRefresher
 from .utils.qrcode_generator import QRCodeGenerator
 
@@ -13,21 +22,51 @@ from .utils.qrcode_generator import QRCodeGenerator
 class BiliService:
     def __init__(self):
         self.client = BiliClient()
+        self.login_api = LoginAPI(self.client)
+        self.dynamic_api = DynamicAPI(self.client)
+        self.video_api = VideoAPI(self.client)
+        self.live_api = LiveAPI(self.client)
+        self.season_api = SeasonAPI(self.client)
+        self.search_api = SearchAPI(self.client)
+        self.user_api = UserAPI(self.client)
         self.cookie_file = "cache/bilibili_cookies.json"
         self.qr_generator = QRCodeGenerator()
-        self.cookie_refresher = CookieRefresher(self.client.client)
+        # Cookie刷新器使用BiliClient以支持限流等功能
+        self.cookie_refresher = CookieRefresher(self.client)
+        
+        # 初始化解析器和搜索服务
+        async def _get_cookies():
+            """获取Cookie的包装函数"""
+            result = await self.get_valid_cookies()
+            return result[0] if result else None
+        
+        self.parser = BilibiliParser(
+            dynamic_api=self.dynamic_api,
+            video_api=self.video_api,
+            live_api=self.live_api,
+            season_api=self.season_api,
+            user_api=self.user_api,
+            get_cookies=_get_cookies
+        )
+        self.search_service = BilibiliSearchService(
+            search_api=self.search_api,
+            user_api=self.user_api,
+            season_api=self.season_api,
+            video_api=self.video_api,
+            get_cookies=_get_cookies
+        )
 
     async def generate_login_qrcode(self) -> Optional[Tuple[str, str]]:
         """
         生成登录二维码
         """
-        return await self.client.generate_qrcode()
+        return await self.login_api.generate_qrcode()
 
     async def wait_for_qrcode_login(self, qrcode_key: str, timeout: int = 180) -> Optional[Tuple[BiliCookie, str]]:
         """
         等待扫码登录完成
         """
-        return await self.client.wait_for_login(qrcode_key, timeout)
+        return await self.login_api.wait_for_login(qrcode_key, timeout)
 
     def save_cookies(self, cookies: BiliCookie, refresh_token: str = "") -> bool:
         """
@@ -76,13 +115,6 @@ class BiliService:
         except Exception as e:
             logger.warn("BiliService", f"加载Cookie失败: {e}")
             return None
-
-    def has_valid_cookies(self) -> bool:
-        """
-        检查Cookie有效性
-        """
-        result = self.load_cookies()
-        return result is not None
 
     def display_qrcode(self, qr_url: str, show_terminal: bool = True, save_image: bool = False):
         """
@@ -161,24 +193,3 @@ class BiliService:
         
         logger.info("BiliService", "Cookie无效，需要重新登录")
         return await self.login_with_qrcode()
-
-    async def get_user_dynamics(self, host_mid: int, offset: str = "", update_baseline: str = "") \
-            -> Optional[DynamicResponse]:
-        """
-        获取指定UP主的动态列表
-        Args:
-            host_mid: UP主UID
-            offset: 分页偏移量
-            update_baseline: 更新基线
-        Returns:
-            DynamicResponse / None
-        """
-        result = await self.ensure_valid_cookies()
-        if not result:
-            logger.warn("BiliService", "无法获取有效Cookie，无法获取动态")
-            return None
-        
-        cookies, _ = result
-        
-        # 获取动态
-        return await self.client.get_user_dynamics(host_mid, cookies, offset, update_baseline)

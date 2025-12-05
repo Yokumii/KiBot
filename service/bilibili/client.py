@@ -1,248 +1,332 @@
-import httpx
+"""
+Bilibili HTTP 客户端（增强版）
+支持限流、重试、连接池、WBI签名等功能
+"""
 import asyncio
-from typing import Optional, Tuple
+import httpx
+from typing import Optional, Dict, Any, List, Tuple
 from urllib.parse import urlparse, parse_qs
 
 from infra.logger import logger
-from .models import (
-    QRCodeGenerateResponse, QRCodePollResponse, BiliCookie,
-    DynamicResponse
-)
-
-"""
-相关 API 参考 
-https://socialsisteryi.github.io/bilibili-API-collect/docs/login/login_action/QR.html#web%E7%AB%AF%E6%89%AB%E7%A0%81%E7%99%BB%E5%BD%95
-"""
+from .models import NavInfoResponse, WbiImages
+from .exceptions import BiliAPIException, BiliNetworkException, raise_for_code
+from .utils.rate_limiter import RateLimiter
+from .utils.wbi_sign import extract_wbi_keys, generate_wbi_sign
+from .utils.cache import ResponseCache
 
 
 class BiliClient:
-    def __init__(self):
+    """
+    Bilibili HTTP客户端
+    支持多客户端连接池、请求限流、自动重试、WBI签名等功能
+    """
+    
+    def __init__(
+        self,
+        timeout: float = 15.0,
+        connect_timeout: float = 5.0,
+        api_interval: float = 10.0,
+        max_retries: int = 3,
+        client_pool_size: int = 3
+    ):
+        """
+        初始化客户端
+        Args:
+            timeout: 请求超时时间（秒）
+            connect_timeout: 连接超时时间（秒）
+            api_interval: API访问间隔（秒）
+            max_retries: 最大重试次数
+            client_pool_size: 客户端连接池大小
+        """
         self.base_url = "https://passport.bilibili.com"
         self.api_base_url = "https://api.bilibili.com"
-        self.headers = {
+        self.live_api_base_url = "https://api.live.bilibili.com"
+        
+        self.timeout = httpx.Timeout(timeout, connect=connect_timeout)
+        self.rate_limiter = RateLimiter(interval=api_interval)
+        self.max_retries = max_retries
+        
+        # 创建客户端连接池
+        self.clients: List[httpx.AsyncClient] = []
+        self.current_client_index = 0
+        self._init_clients(client_pool_size)
+        
+        # WBI签名相关
+        self._wbi_img_key: Optional[str] = None
+        self._wbi_sub_key: Optional[str] = None
+        self._wbi_salt: Optional[str] = None
+        
+        # 响应缓存（可选）
+        self.cache: Optional[ResponseCache] = None
+        self.cache_enabled = False
+    
+    def enable_cache(self, default_ttl: int = 300, max_size: int = 1000):
+        """
+        启用响应缓存
+        Args:
+            default_ttl: 默认缓存时间（秒）
+            max_size: 最大缓存条目数
+        """
+        self.cache = ResponseCache(default_ttl=default_ttl, max_size=max_size)
+        self.cache_enabled = True
+    
+    def disable_cache(self):
+        """禁用响应缓存"""
+        self.cache_enabled = False
+        if self.cache:
+            self.cache.clear()
+            self.cache = None
+    
+    def _init_clients(self, pool_size: int):
+        """初始化客户端连接池"""
+        headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                          "Chrome/91.0.4472.124 Safari/537.36",
+                          "Chrome/120.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             "Connection": "keep-alive",
-            "Referer": "https://passport.bilibili.com/login",
-        }  # 随便造一个
-        self.client = httpx.AsyncClient(
-            headers=self.headers,
-            timeout=httpx.Timeout(10, connect=5),
-            follow_redirects=True
+            "Referer": "https://www.bilibili.com/",
+        }
+        
+        for _ in range(pool_size):
+            client = httpx.AsyncClient(
+                headers=headers,
+                timeout=self.timeout,
+                follow_redirects=True,
+                http2=True  # 启用HTTP/2
+            )
+            self.clients.append(client)
+    
+    def _get_client(self) -> httpx.AsyncClient:
+        """获取当前客户端（轮询）"""
+        client = self.clients[self.current_client_index]
+        self.current_client_index = (self.current_client_index + 1) % len(self.clients)
+        return client
+    
+    async def _get_wbi_keys(self) -> Tuple[Optional[str], Optional[str]]:
+        """
+        获取WBI签名密钥
+        Returns:
+            (img_key, sub_key)
+        """
+        if self._wbi_img_key and self._wbi_sub_key:
+            return self._wbi_img_key, self._wbi_sub_key
+        
+        try:
+            url = f"{self.api_base_url}/x/web-interface/nav"
+            client = self._get_client()
+            response = await client.get(url)
+            
+            if response.status_code == 200:
+                data = response.json()
+                nav_response = NavInfoResponse(**data)
+                if nav_response.data and nav_response.data.wbi_img:
+                    img_key, sub_key = extract_wbi_keys(
+                        nav_response.data.wbi_img.img_url,
+                        nav_response.data.wbi_img.sub_url
+                    )
+                    self._wbi_img_key = img_key
+                    self._wbi_sub_key = sub_key
+                    return img_key, sub_key
+        except Exception as e:
+            logger.warn("BiliClient", f"获取WBI密钥失败: {e}")
+        
+        return None, None
+    
+    def _should_use_wbi(self, url: str) -> bool:
+        """判断URL是否需要WBI签名"""
+        return "wbi" in url.lower()
+    
+    async def _add_wbi_sign(self, params: Dict[str, Any], url: str) -> Dict[str, Any]:
+        """
+        为参数添加WBI签名
+        Args:
+            params: 原始参数
+            url: 请求URL
+        Returns:
+            添加了w_rid和wts的参数
+        """
+        if not self._should_use_wbi(url):
+            return params
+        
+        img_key, sub_key = await self._get_wbi_keys()
+        if not img_key or not sub_key:
+            logger.warn("BiliClient", "WBI密钥获取失败，跳过签名")
+            return params
+        
+        sign_params = generate_wbi_sign(params, img_key, sub_key)
+        return {**params, **sign_params}
+    
+    async def request(
+        self,
+        method: str,
+        url: str,
+        api_type: str = "default",
+        params: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        cookies: Optional[Dict[str, str]] = None,
+        headers: Optional[Dict[str, str]] = None,
+        use_cache: bool = True,
+        cache_ttl: Optional[int] = None,
+        **kwargs
+    ) -> httpx.Response:
+        """
+        发送HTTP请求（带限流和重试）
+        Args:
+            method: HTTP方法
+            url: 请求URL
+            api_type: API类型（用于限流）
+            params: URL参数
+            data: 请求体数据
+            cookies: Cookie
+            headers: 额外请求头
+            use_cache: 是否使用缓存（仅GET请求）
+            cache_ttl: 缓存时间（秒），None则使用默认值
+            **kwargs: 其他httpx参数
+        Returns:
+            HTTP响应
+        Raises:
+            BiliAPIException: API返回错误
+        """
+        # 注意：缓存功能需要特殊处理，因为需要构造Response对象
+        # 这里暂时不实现缓存响应返回，只缓存JSON数据用于后续优化
+        
+        # 等待限流
+        await self.rate_limiter.wait(api_type)
+        
+        # 处理WBI签名
+        if params and self._should_use_wbi(url):
+            params = await self._add_wbi_sign(params, url)
+        
+        client = self._get_client()
+        
+        # 重试机制
+        last_exception = None
+        for attempt in range(self.max_retries):
+            try:
+                response = await client.request(
+                    method=method,
+                    url=url,
+                    params=params,
+                    data=data,
+                    cookies=cookies,
+                    headers=headers,
+                    **kwargs
+                )
+                
+                # 检查响应状态
+                if response.status_code != 200:
+                    raise_for_code(
+                        response.status_code,
+                        f"HTTP {response.status_code}",
+                        url
+                    )
+                
+                # 检查业务错误码
+                try:
+                    json_data = response.json()
+                    code = json_data.get("code", 0)
+                    if code != 0:
+                        message = json_data.get("message", "未知错误")
+                        raise_for_code(code, message, url)
+                except (ValueError, KeyError):
+                    # 不是JSON响应或格式不对，继续返回原始响应
+                    pass
+                
+                # 缓存响应（仅GET请求且成功）
+                if method.upper() == "GET" and use_cache and self.cache_enabled and self.cache:
+                    try:
+                        # 缓存JSON数据
+                        json_data = response.json()
+                        self.cache.set(url, json_data, params, cache_ttl)
+                    except (ValueError, AttributeError):
+                        # 不是JSON响应，不缓存
+                        pass
+                
+                return response
+                
+            except (httpx.Timeout, httpx.NetworkError) as e:
+                last_exception = e
+                if attempt < self.max_retries - 1:
+                    wait_time = 2 ** attempt  # 指数退避
+                    logger.warn(
+                        "BiliClient",
+                        f"请求失败，{wait_time}秒后重试 ({attempt + 1}/{self.max_retries}): {e}"
+                    )
+                    await asyncio.sleep(wait_time)
+                else:
+                    raise BiliNetworkException(f"请求失败: {e}") from e
+            except BiliAPIException:
+                raise
+            except Exception as e:
+                raise BiliAPIException(-1, f"未知错误: {e}", url) from e
+        
+        if last_exception:
+            raise BiliNetworkException(f"请求失败: {last_exception}") from last_exception
+    
+    async def get(
+        self,
+        url: str,
+        api_type: str = "default",
+        params: Optional[Dict[str, Any]] = None,
+        cookies: Optional[Dict[str, str]] = None,
+        headers: Optional[Dict[str, str]] = None,
+        **kwargs
+    ) -> httpx.Response:
+        """发送GET请求"""
+        return await self.request(
+            "GET", url, api_type=api_type,
+            params=params, cookies=cookies, headers=headers, **kwargs
         )
-
-    # -----------------这是一条登录/鉴权部分的分割线----------------- #
-    async def generate_qrcode(self) -> Optional[Tuple[str, str]]:
-        """
-        生成二维码
-        """
-        url = f"{self.base_url}/x/passport-login/web/qrcode/generate"
-
-        try:
-            response = await self.client.get(url)
-        except httpx.Timeout:
-            logger.warn("BiliClient", "生成二维码超时")
-            return None
-        except Exception as e:
-            logger.warn("BiliClient", f"生成二维码请求失败: {e}")
-            return None
-
-        if response.status_code != 200:
-            logger.warn("BiliClient", f"生成二维码失败: HTTP {response.status_code}")
-            return None
-
-        try:
-            data = response.json()
-            qr_response = QRCodeGenerateResponse(**data)
-        except Exception as e:
-            logger.warn("BiliClient", f"解析二维码响应失败: {e}")
-            return None
-
-        if qr_response.code != 0:
-            logger.warn("BiliClient", f"生成二维码失败: {qr_response.message}")
-            return None
-
-        if not qr_response.data:
-            logger.warn("BiliClient", "二维码数据为空")
-            return None
-
-        return qr_response.data.url, qr_response.data.qrcode_key
-
-    async def poll_qrcode(self, qrcode_key: str) -> Optional[QRCodePollResponse]:
-        """
-        轮询扫码登录状态
-        """
-        url = f"{self.base_url}/x/passport-login/web/qrcode/poll"
-        params = {"qrcode_key": qrcode_key}
-
-        try:
-            response = await self.client.get(url, params=params)
-        except httpx.Timeout:
-            logger.warn("BiliClient", "轮询二维码超时")
-            return None
-        except Exception as e:
-            logger.warn("BiliClient", f"轮询二维码请求失败: {e}")
-            return None
-
-        if response.status_code != 200:
-            logger.warn("BiliClient", f"轮询二维码失败: HTTP {response.status_code}")
-            return None
-
-        try:
-            data = response.json()
-            poll_response = QRCodePollResponse(**data)
-        except Exception as e:
-            logger.warn("BiliClient", f"解析轮询响应失败: {e}")
-            return None
-
-        return poll_response
-
+    
+    async def post(
+        self,
+        url: str,
+        api_type: str = "default",
+        params: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        cookies: Optional[Dict[str, str]] = None,
+        headers: Optional[Dict[str, str]] = None,
+        **kwargs
+    ) -> httpx.Response:
+        """发送POST请求"""
+        return await self.request(
+            "POST", url, api_type=api_type,
+            params=params, data=data, cookies=cookies, headers=headers, **kwargs
+        )
+    
     @staticmethod
-    async def extract_cookies_from_url(url: str) -> Optional[BiliCookie]:
+    def extract_cookies_from_url(url: str) -> Optional[Dict[str, str]]:
         """
         从登录成功返回的URL中提取Cookie信息
+        Args:
+            url: 登录成功后的URL
+        Returns:
+            Cookie字典
         """
         try:
             parsed_url = urlparse(url)
             query_params = parse_qs(parsed_url.query)
-
+            
             cookie_dict = {
                 'DedeUserID': query_params.get('DedeUserID', [''])[0],
                 'DedeUserID__ckMd5': query_params.get('DedeUserID__ckMd5', [''])[0],
                 'SESSDATA': query_params.get('SESSDATA', [''])[0],
                 'bili_jct': query_params.get('bili_jct', [''])[0]
             }
-
+            
             # 验证所有必需的cookie字段是否存在且不为空
             if all(cookie_dict.values()):
-                return BiliCookie(**cookie_dict)
+                return cookie_dict
             else:
                 logger.warn("BiliClient", "URL中缺少必需的Cookie参数")
                 return None
-
         except Exception as e:
             logger.warn("BiliClient", f"从URL解析Cookie失败: {e}")
             return None
-
-    async def wait_for_login(self, qrcode_key: str, timeout: int = 180) -> Optional[Tuple[BiliCookie, str]]:
-        """
-        等待用户扫码登录，二维码默认失效的时间为180秒
-        """
-        start_time = asyncio.get_event_loop().time()
-
-        while True:
-            # 检查超时
-            if asyncio.get_event_loop().time() - start_time > timeout:
-                logger.warn("BiliClient", "二维码登录超时")
-                return None
-
-            # 轮询
-            poll_response = await self.poll_qrcode(qrcode_key)
-            if not poll_response:
-                await asyncio.sleep(2)
-                continue
-
-            if poll_response.code != 0:
-                logger.warn("BiliClient", f"轮询失败: {poll_response.message}")
-                await asyncio.sleep(2)
-                continue
-
-            if not poll_response.data:
-                await asyncio.sleep(2)
-                continue
-
-            if poll_response.data.code == 0:
-                # 登录成功，这里需要直接对该轮询中的返回内容进行解析，获取Cookie和refresh_token
-                logger.info("BiliClient", "扫码登录成功，获取Cookie和refresh_token...")
-                cookies = await self.extract_cookies_from_url(poll_response.data.url)
-                if cookies:
-                    refresh_token = poll_response.data.refresh_token
-                    if not refresh_token:
-                        logger.warn("BiliClient", "无法提取refresh_token")
-                        return None
-                    return cookies, refresh_token
-                else:
-                    logger.warn("BiliClient", "无法提取Cookie")
-                    return None
-            elif poll_response.data.code == 86038:
-                logger.warn("BiliClient", "二维码已失效")
-                return None
-            elif poll_response.data.code == 86090:
-                logger.info("BiliClient", "二维码已扫码，等待确认...")
-            elif poll_response.data.code == 86101:
-                logger.info("BiliClient", "等待扫码...")
-            else:
-                logger.warn("BiliClient", f"未知状态码: {poll_response.data.code}")
-
-            await asyncio.sleep(2)
-
-    # -----------------登录/鉴权部分到此结束----------------- #
-
-    # -----------------这是一条获取动态部分的分割线----------------- #
-    async def get_user_dynamics(self, host_mid: int, cookies: BiliCookie, offset: str = "",
-                                update_baseline: str = "") -> Optional[DynamicResponse]:
-        """
-        获取指定UP主的动态列表
-        Args:
-            host_mid: UP主UID
-            cookies: 用户Cookie
-            offset: 分页偏移量
-            update_baseline: 更新基线（被坑了，这个 API 的这个参数根本没有限制作用）
-        Returns:
-            DynamicResponse / None
-        """
-        url = f"{self.api_base_url}/x/polymer/web-dynamic/v1/feed/all"
-
-        params = {
-            "host_mid": host_mid,
-            "platform": "web",
-            "features": "itemOpusStyle,listOnlyfans,opusBigCover,onlyfansVote,decorationCard,onlyfansAssetsV2,"
-                        "forwardListHidden,ugcDelete",
-            "web_location": "333.1365"
-        }
-
-        if offset:
-            params["offset"] = offset
-        if update_baseline:
-            params["update_baseline"] = update_baseline
-
-        cookie_dict = {
-            "SESSDATA": cookies.SESSDATA,
-            "bili_jct": cookies.bili_jct,
-            "DedeUserID": cookies.DedeUserID,
-            "DedeUserID__ckMd5": cookies.DedeUserID__ckMd5
-        }
-
-        try:
-            response = await self.client.get(url, params=params, cookies=cookie_dict)
-        except httpx.Timeout:
-            logger.warn("BiliClient", f"获取UP主 {host_mid} 动态超时")
-            return None
-        except Exception as e:
-            logger.warn("BiliClient", f"获取UP主 {host_mid} 动态请求失败: {e}")
-            return None
-
-        if response.status_code != 200:
-            logger.warn("BiliClient", f"获取UP主 {host_mid} 动态失败: HTTP {response.status_code}")
-            return None
-
-        try:
-            data = response.json()
-            dynamic_response = DynamicResponse(**data)
-        except Exception as e:
-            logger.warn("BiliClient", f"解析UP主 {host_mid} 动态响应失败: {e}")
-            return None
-
-        if dynamic_response.code != 0:
-            logger.warn("BiliClient", f"获取UP主 {host_mid} 动态失败: {dynamic_response.message}")
-            return None
-
-        return dynamic_response
-
-    # -----------------获取动态部分到此结束----------------- #
-
+    
     async def close(self):
-        """关闭客户端"""
-        await self.client.aclose()
+        """关闭所有客户端"""
+        for client in self.clients:
+            await client.aclose()
+        self.clients.clear()

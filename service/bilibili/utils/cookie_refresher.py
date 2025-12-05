@@ -8,6 +8,7 @@ from Crypto.PublicKey import RSA
 
 from infra.logger import logger
 from ..models import CookieInfoResponse, CookieRefreshResponse, CookieConfirmResponse, BiliCookie
+from ..client import BiliClient
 
 """
 感谢 https://socialsisteryi.github.io/bilibili-API-collect/docs/login/cookie_refresh.html 对b站 Cookie 刷新机制逆向的详细整理。
@@ -26,8 +27,14 @@ nzPjfdTcqMz7djHum0qSZA0AyCBDABUqCrfNgCiJ00Ra7GmRj+YCK1NJEuewlb40
 JNrRuoEUXpabUzGB8QIDAQAB
 -----END PUBLIC KEY-----'''
     
-    def __init__(self, client):
+    def __init__(self, client=None):
+        """
+        初始化Cookie刷新器
+        Args:
+            client: BiliClient实例或httpx.AsyncClient实例（兼容旧代码）
+        """
         self.client = client
+        self._is_bili_client = isinstance(client, BiliClient) if client else False
     
     def generate_correspond_path(self, timestamp: int) -> str:
         """
@@ -59,20 +66,19 @@ JNrRuoEUXpabUzGB8QIDAQAB
         }
         
         try:
-            response = await self.client.get(url, params=params, cookies=cookie_dict)
-        except Exception as e:
-            logger.warn("CookieRefresher", f"检查Cookie刷新状态失败: {e}")
-            return None
-        
-        if response.status_code != 200:
-            logger.warn("CookieRefresher", f"检查Cookie刷新状态HTTP错误: {response.status_code}")
-            return None
-        
-        try:
+            if self._is_bili_client:
+                response = await self.client.get(url, api_type="login", params=params, cookies=cookie_dict)
+            else:
+                response = await self.client.get(url, params=params, cookies=cookie_dict)
+            
+            if not self._is_bili_client and response.status_code != 200:
+                logger.warn("CookieRefresher", f"检查Cookie刷新状态HTTP错误: {response.status_code}")
+                return None
+            
             data = response.json()
             info_response = CookieInfoResponse(**data)
         except Exception as e:
-            logger.warn("CookieRefresher", f"解析Cookie信息响应失败: {e}")
+            logger.warn("CookieRefresher", f"检查Cookie刷新状态失败: {e}")
             return None
         
         if info_response.code != 0:
@@ -100,13 +106,16 @@ JNrRuoEUXpabUzGB8QIDAQAB
         }
         
         try:
-            response = await self.client.get(url, cookies=cookie_dict)
+            if self._is_bili_client:
+                response = await self.client.get(url, api_type="login", cookies=cookie_dict)
+            else:
+                response = await self.client.get(url, cookies=cookie_dict)
+            
+            if not self._is_bili_client and response.status_code != 200:
+                logger.warn("CookieRefresher", f"获取refresh_csrf HTTP错误: {response.status_code}")
+                return None
         except Exception as e:
             logger.warn("CookieRefresher", f"获取refresh_csrf失败: {e}")
-            return None
-        
-        if response.status_code != 200:
-            logger.warn("CookieRefresher", f"获取refresh_csrf HTTP错误: {response.status_code}")
             return None
         
         # 请求该 url 会返回一个 html 页面，实时刷新口令 refresh_csrf 存放于 html 标签中，形如 <div id="1-name">XXXX</div>，这里使用正则表达式进行提取
@@ -142,13 +151,16 @@ JNrRuoEUXpabUzGB8QIDAQAB
         }
         
         try:
-            response = await self.client.post(url, data=data, cookies=cookie_dict)
+            if self._is_bili_client:
+                response = await self.client.post(url, api_type="login", data=data, cookies=cookie_dict)
+            else:
+                response = await self.client.post(url, data=data, cookies=cookie_dict)
+            
+            if not self._is_bili_client and response.status_code != 200:
+                logger.warn("CookieRefresher", f"刷新Cookie HTTP错误: {response.status_code}")
+                return None
         except Exception as e:
             logger.warn("CookieRefresher", f"刷新Cookie失败: {e}")
-            return None
-        
-        if response.status_code != 200:
-            logger.warn("CookieRefresher", f"刷新Cookie HTTP错误: {response.status_code}")
             return None
         
         try:
@@ -201,13 +213,16 @@ JNrRuoEUXpabUzGB8QIDAQAB
         }
         
         try:
-            response = await self.client.post(url, data=data, cookies=cookie_dict)
+            if self._is_bili_client:
+                response = await self.client.post(url, api_type="login", data=data, cookies=cookie_dict)
+            else:
+                response = await self.client.post(url, data=data, cookies=cookie_dict)
+            
+            if not self._is_bili_client and response.status_code != 200:
+                logger.warn("CookieRefresher", f"确认刷新HTTP错误: {response.status_code}")
+                return False
         except Exception as e:
             logger.warn("CookieRefresher", f"确认刷新失败: {e}")
-            return False
-        
-        if response.status_code != 200:
-            logger.warn("CookieRefresher", f"确认刷新HTTP错误: {response.status_code}")
             return False
         
         try:

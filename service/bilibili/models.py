@@ -169,9 +169,303 @@ class CookieConfirmResponse(BaseModel):
     ttl: int
 
 
-# 延迟解析，避免类型检查出错
+# ==================== 视频相关模型 ====================
+
+class VideoInfoResponse(BaseModel):
+    """视频信息响应"""
+    code: int
+    message: str
+    ttl: int
+    data: Optional['VideoInfo'] = None
+
+
+class VideoInfo(BaseModel):
+    """视频信息"""
+    aid: int
+    bvid: str
+    cid: Optional[int] = None
+    copyright: int  # 1:原创 2:转载
+    ctime: int  # 创建时间戳
+    desc: str  # 视频简介
+    desc_v2: Optional[List[Dict[str, Any]]] = None
+    dimension: Optional[Dict[str, Any]] = None
+    duration: int  # 视频时长（秒）
+    dynamic: str  # 同步发布的动态文字
+    owner: Optional['VideoOwner'] = None
+    pages: Optional[List['VideoPage']] = None
+    pic: str  # 封面图
+    pubdate: int  # 发布时间戳
+    redirect_url: Optional[str] = None
+    season_id: Optional[int] = None
+    staff: Optional[List[Dict[str, Any]]] = None
+    stat: Optional['VideoStat'] = None
+    subtitle: Optional[Dict[str, Any]] = None
+    tid: int  # 分区ID
+    title: str
+    tname: str  # 分区名称
+    videos: int  # 分P数
+    rights: Optional[Dict[str, Any]] = None
+    is_chargeable_season: bool = False
+    is_story: bool = False
+    is_upower_exclusive: bool = False
+
+
+class VideoOwner(BaseModel):
+    """视频UP主信息"""
+    mid: int
+    name: str
+    face: str
+
+
+class VideoPage(BaseModel):
+    """视频分P信息"""
+    cid: int
+    page: int
+    part: str
+    duration: int
+
+
+class VideoStat(BaseModel):
+    """视频统计数据"""
+    aid: int
+    view: int  # 播放数
+    danmaku: int  # 弹幕数
+    reply: int  # 评论数
+    favorite: int  # 收藏数
+    coin: int  # 投币数
+    share: int  # 分享数
+    like: int  # 点赞数
+    now_rank: int
+    his_rank: int
+    evaluation: str
+    vt: int
+
+
+class VideoSearchResult(BaseModel):
+    """视频搜索结果"""
+    code: int
+    message: str
+    ttl: int
+    data: Optional['VideoSearchData'] = None
+
+
+class VideoSearchData(BaseModel):
+    """视频搜索数据"""
+    list: Optional['VideoList'] = None
+    page: Optional['VideoSearchPage'] = None
+
+
+class VideoList(BaseModel):
+    """视频列表"""
+    tlist: Optional[Dict[str, 'VideoTypeInfo']] = None
+    vlist: List['VideoSimple']
+
+
+class VideoTypeInfo(BaseModel):
+    """视频类型信息"""
+    count: int
+    name: str
+    tid: int
+
+
+class VideoSimple(BaseModel):
+    """简单视频信息"""
+    aid: int
+    bvid: str
+    title: str
+    pic: str
+    author: str
+    mid: int
+    created: int
+    length: str
+    description: str
+    typeid: int
+    typename: str
+    play: int  # 播放数
+    video_review: int  # 弹幕数
+    favorites: int  # 收藏数
+    tag: str
+    review: int  # 评论数
+
+
+class VideoSearchPage(BaseModel):
+    """视频搜索分页信息"""
+    count: int
+    pn: int
+    ps: int
+
+
+# ==================== 直播相关模型 ====================
+
+class LiveRoomInfoResponse(BaseModel):
+    """直播间信息响应"""
+    code: int
+    message: str
+    msg: Optional[str] = None
+    data: Optional['LiveRoomInfo'] = None
+
+
+class LiveRoomInfo(BaseModel):
+    """直播间信息"""
+    uid: int
+    room_id: int
+    short_id: int
+    attention: int  # 关注数
+    online: int  # 观看人数
+    is_portrait: bool
+    description: str
+    live_status: int  # 0:未开播 1:直播中 2:轮播中
+    area_id: int
+    parent_area_id: int
+    parent_area_name: str
+    old_area_id: int
+    background: str
+    title: str
+    user_cover: str
+    keyframe: str
+    is_strict_room: bool
+    live_time: str
+    tags: str
+    area_name: str
+
+
+class LiveInfoResponse(BaseModel):
+    """直播详情响应"""
+    code: int
+    message: str
+    msg: Optional[str] = None
+    data: Optional['LiveInfo'] = None
+
+
+class LiveInfo(BaseModel):
+    """直播详情"""
+    room_info: Optional['LiveRoomInfo'] = None
+    anchor_info: Optional[Dict[str, Any]] = None
+
+
+# ==================== 用户相关模型 ====================
+
+class UserInfoResponse(BaseModel):
+    """用户信息响应"""
+    code: int
+    message: str
+    ttl: int
+    data: Optional['UserInfo'] = None
+
+
+class UserInfo(BaseModel):
+    """用户信息"""
+    mid: int
+    name: str
+    sex: str
+    face: str
+    face_nft: int
+    sign: str
+    rank: int
+    level: int
+    jointime: int
+    moral: int
+    silence: int
+    coins: int
+    fans_badge: bool
+    official: Optional[Dict[str, Any]] = None
+    vip: Optional[Dict[str, Any]] = None
+    pendant: Optional[Dict[str, Any]] = None
+    nameplate: Optional[Dict[str, Any]] = None
+    is_followed: bool
+    top_photo: str
+    live_room: Optional[Dict[str, Any]] = None
+
+
+# ==================== 剧集相关模型 ====================
+
+class SeasonInfoResponse(BaseModel):
+    """剧集信息响应"""
+    code: int
+    message: str
+    result: Optional['SeasonInfo'] = None
+
+
+class SeasonInfo(BaseModel):
+    """剧集信息"""
+    season_id: int
+    title: str
+    cover: str
+    evaluate: str
+    new_ep: Optional[Dict[str, Any]] = None
+    episodes: Optional[List['SeasonEpisode']] = None
+
+
+class SeasonEpisode(BaseModel):
+    """剧集分集信息"""
+    aid: int
+    bvid: str
+    cid: int
+    cover: str
+    duration: int
+    ep_id: int
+    index: str
+    long_title: str
+    pub_time: int
+    title: str
+
+
+# ==================== 搜索相关模型 ====================
+
+class SearchResponse(BaseModel):
+    """搜索响应"""
+    code: int
+    message: str
+    ttl: int
+    data: Optional['SearchData'] = None
+
+
+class SearchData(BaseModel):
+    """搜索数据"""
+    result: Optional[List[Dict[str, Any]]] = None
+    pages: Optional[int] = None
+    numResults: Optional[int] = None
+    numPages: Optional[int] = None
+
+
+# ==================== 导航栏/WBI相关模型 ====================
+
+class NavInfoResponse(BaseModel):
+    """导航栏信息响应（用于获取WBI密钥）"""
+    code: int
+    message: str
+    ttl: int
+    data: Optional['NavInfo'] = None
+
+
+class NavInfo(BaseModel):
+    """导航栏信息"""
+    isLogin: bool
+    wbi_img: Optional['WbiImages'] = None
+
+
+class WbiImages(BaseModel):
+    """WBI图片密钥"""
+    img_url: str
+    sub_url: str
+
+
+# ==================== 异常类 ====================
+# 异常类已移至 exceptions.py，这里保留以保持向后兼容
+from .exceptions import BiliAPIException
+
+
+# ==================== 延迟解析，避免类型检查出错 ====================
 QRCodeGenerateResponse.model_rebuild()
 QRCodePollResponse.model_rebuild()
 DynamicResponse.model_rebuild()
 CookieInfoResponse.model_rebuild()
 CookieRefreshResponse.model_rebuild()
+VideoInfoResponse.model_rebuild()
+VideoSearchResult.model_rebuild()
+LiveRoomInfoResponse.model_rebuild()
+LiveInfoResponse.model_rebuild()
+UserInfoResponse.model_rebuild()
+SeasonInfoResponse.model_rebuild()
+SearchResponse.model_rebuild()
+NavInfoResponse.model_rebuild()
