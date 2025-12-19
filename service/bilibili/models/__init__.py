@@ -11,6 +11,7 @@ from .dynamic import (
 )
 from .video import VideoOwner, VideoStat, VideoDimension, VideoPage, VideoInfo
 from .user import UserInfo, UserStat, UserCard
+from .live import LiveRoomInfo, LiveRoomOldInfo
 
 __all__ = [
     # common
@@ -27,4 +28,6 @@ __all__ = [
     "VideoOwner", "VideoStat", "VideoDimension", "VideoPage", "VideoInfo",
     # user
     "UserInfo", "UserStat", "UserCard",
+    # live
+    "LiveRoomInfo", "LiveRoomOldInfo",
 ]

@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from adapter.napcat.http_api import NapCatHttpClient
 from core.pusher.bangumi_scheduler import BangumiScheduler
 from core.pusher.bilibili_scheduler import BilibiliScheduler
+from core.pusher.live_scheduler import LiveScheduler
 from core.pusher.weather_scheduler import WeatherScheduler
 from infra.logger import logger
 from service.bangumi.service import BangumiService
@@ -23,6 +24,7 @@ class Handler:
         self.bangumi_scheduler: BangumiScheduler = BangumiScheduler(self.client)
         self.bilibili_scheduler: BilibiliScheduler = BilibiliScheduler(self.client)
         self.bilibili_svc: BiliService = BiliService()
+        self.live_scheduler: LiveScheduler = LiveScheduler(self.client)
 
     async def reply_handler(self, group_id, msg, user_id):
         # resp = await self.llm_svc.chat(msg)
@@ -268,8 +270,42 @@ class Handler:
                 return
             await self._handle_user_info(group_id, parts[1])
 
+        # 直播相关命令
+        elif command == "直播订阅":
+            if len(parts) < 2:
+                await self.client.send_group_msg(group_id, "❌ 请指定UP主UID，例如：/b站 直播订阅 123456")
+                return
+            up_uid = parts[1]
+            if not up_uid.isdigit():
+                await self.client.send_group_msg(group_id, "❌ 请输入正确的UP主UID")
+                return
+            await self._handle_live_subscribe(group_id, up_uid)
+
+        elif command == "直播取消":
+            if len(parts) < 2:
+                await self.client.send_group_msg(group_id, "❌ 请指定UP主UID，例如：/b站 直播取消 123456")
+                return
+            up_uid = parts[1]
+            if not up_uid.isdigit():
+                await self.client.send_group_msg(group_id, "❌ 请输入正确的UP主UID")
+                return
+            await self._handle_live_unsubscribe(group_id, up_uid)
+
+        elif command == "直播列表":
+            await self._handle_live_list_subscriptions(group_id)
+
+        elif command == "直播状态":
+            if len(parts) < 2:
+                await self.client.send_group_msg(group_id, "❌ 请指定UP主UID，例如：/b站 直播状态 123456")
+                return
+            up_uid = parts[1]
+            if not up_uid.isdigit():
+                await self.client.send_group_msg(group_id, "❌ 请输入正确的UP主UID")
+                return
+            await self._handle_live_status(group_id, up_uid)
+
         else:
-            await self.client.send_group_msg(group_id, default_msg + "支持的命令：订阅、取消订阅、查看订阅、检查、视频、UP主")
+            await self.client.send_group_msg(group_id, default_msg + "支持的命令：订阅、取消订阅、查看订阅、检查、视频、UP主、直播订阅、直播取消、直播列表、直播状态")
 
     async def _handle_bilibili_subscribe(self, group_id, up_uid: str):
         """处理订阅UP主动态推送"""
@@ -368,6 +404,88 @@ class Handler:
             if info.face:
                 await self.client.send_group_msg(group_id, f"[CQ:image,file={info.face}]")
 
+    async def _handle_live_subscribe(self, group_id, up_uid: str):
+        """处理直播订阅"""
+        group_id_str = str(group_id)
+
+        if self.live_scheduler.is_subscribed(group_id_str, up_uid):
+            await self.client.send_group_msg(group_id, f"❌ 已订阅 UP主 {up_uid} 的直播")
+            return
+
+        # 验证UP主是否存在
+        user = await self.bilibili_svc.get_user_info(int(up_uid))
+        if not user:
+            await self.client.send_group_msg(group_id, f"❌ 未找到 UP主 {up_uid}")
+            return
+
+        self.live_scheduler.subscribe(group_id_str, up_uid)
+        await self.client.send_group_msg(group_id, f"✅ 已订阅 {user.info.name} 的直播通知\n当 TA 开播时会第一时间通知您！")
+
+    async def _handle_live_unsubscribe(self, group_id, up_uid: str):
+        """处理取消直播订阅"""
+        group_id_str = str(group_id)
+
+        if not self.live_scheduler.is_subscribed(group_id_str, up_uid):
+            await self.client.send_group_msg(group_id, f"❌ 未订阅 UP主 {up_uid} 的直播")
+            return
+
+        self.live_scheduler.unsubscribe(group_id_str, up_uid)
+        await self.client.send_group_msg(group_id, f"✅ 已取消订阅 UP主 {up_uid} 的直播通知")
+
+    async def _handle_live_list_subscriptions(self, group_id):
+        """处理查看直播订阅列表"""
+        group_id_str = str(group_id)
+        subscribed_ups = self.live_scheduler.get_subscribed_ups(group_id_str)
+
+        if not subscribed_ups:
+            await self.client.send_group_msg(group_id, "📺 本群暂无直播订阅")
+            return
+
+        msg = f"📺 本群已订阅 {len(subscribed_ups)} 位 UP主 的直播：\n"
+
+        for up_uid in subscribed_ups:
+            # 获取UP主信息
+            user = await self.bilibili_svc.get_user_info(int(up_uid))
+            if user:
+                msg += f"  • {user.info.name} (UID: {up_uid})\n"
+            else:
+                msg += f"  • UID: {up_uid}\n"
+
+        await self.client.send_group_msg(group_id, msg.strip())
+
+    async def _handle_live_status(self, group_id, up_uid: str):
+        """处理查询直播状态"""
+        room_info = await self.live_scheduler.check_live_status(up_uid)
+
+        if not room_info:
+            await self.client.send_group_msg(group_id, f"❌ 查询 UP主 {up_uid} 直播状态失败")
+            return
+
+        if room_info.is_living:
+            text = f"""🔴 正在直播
+
+👤 {room_info.uname}
+📺 {room_info.title}
+🎮 分区: {room_info.area_v2_parent_name} · {room_info.area_v2_name}
+👥 人气: {room_info.online}
+
+🔗 {room_info.live_url}"""
+        else:
+            text = f"""⚫ 未开播
+
+👤 {room_info.uname}
+📺 上次直播: {room_info.title or '暂无'}
+
+🔗 {room_info.live_url}"""
+
+        try:
+            segments = [{"type": "text", "data": {"text": text}}]
+            if room_info.cover:
+                segments.append({"type": "image", "data": {"file": room_info.cover}})
+            await self.client.send_group_msg_with_segments(group_id, segments)
+        except Exception:
+            await self.client.send_group_msg(group_id, text)
+
     async def help_handler(self, group_id, help_cmd: str):
         """处理帮助请求，根据指定的模块返回详细帮助信息"""
         greet_msg = (
@@ -407,15 +525,23 @@ class Handler:
         # B站模块帮助
         bilibili_help = (
             "📺 B站命令\n"
-            "/b站 订阅 [UP主UID]      → 订阅指定UP主动态推送（每30分钟检查）\n"
-            "/b站 取消订阅 [UP主UID]  → 取消指定UP主动态订阅\n"
-            "/b站 查看订阅            → 查看本群订阅的所有UP主\n"
-            "/b站 检查 [UP主UID]      → 手动检查指定UP主最新动态\n"
+            "【动态订阅】\n"
+            "/b站 订阅 [UID]          → 订阅UP主动态推送（每30分钟检查）\n"
+            "/b站 取消订阅 [UID]      → 取消UP主动态订阅\n"
+            "/b站 查看订阅            → 查看本群动态订阅列表\n"
+            "/b站 检查 [UID]          → 手动检查UP主最新动态\n"
+            "\n【直播订阅】\n"
+            "/b站 直播订阅 [UID]      → 订阅UP主开播提醒（每2分钟检查）\n"
+            "/b站 直播取消 [UID]      → 取消UP主直播订阅\n"
+            "/b站 直播列表            → 查看本群直播订阅列表\n"
+            "/b站 直播状态 [UID]      → 查询UP主当前直播状态\n"
+            "\n【信息查询】\n"
             "/b站 视频 [BV号]         → 查询视频详细信息\n"
             "/b站 UP主 [UID]          → 查询UP主信息\n"
             "示例：\n"
+            "  /b站 订阅 123456\n"
+            "  /b站 直播订阅 123456\n"
             "  /b站 视频 BV1xx411c7mD\n"
-            "  /b站 UP主 123456\n"
         )
 
         if not help_cmd:

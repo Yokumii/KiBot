@@ -46,8 +46,8 @@ class DynamicAuthor(BaseModel):
 
 class ArchiveStat(BaseModel):
     """视频统计"""
-    play: int = 0       # 播放量
-    danmaku: int = 0    # 弹幕数
+    play: str = "0"       # 播放量
+    danmaku: str = "0"    # 弹幕数
 
     class Config:
         extra = "ignore"

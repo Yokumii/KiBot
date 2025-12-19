@@ -347,6 +347,82 @@ class BiliClient:
 
     # -----------------获取用户信息部分到此结束----------------- #
 
+
+    # -----------------直播间部分----------------- #
+
+    async def get_live_status_by_uids(self, uids: list[int]) -> dict[int, "LiveRoomInfo"]:
+        """
+        批量查询用户直播状态
+        API: https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids
+        Args:
+            uids: UP主UID列表
+        Returns:
+            {uid: LiveRoomInfo} 映射
+        """
+        from .models import LiveRoomInfo
+
+        url = "https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids"
+
+        try:
+            response = await self.client.post(url, json={"uids": uids})
+        except httpx.TimeoutException:
+            logger.warn("BiliClient", "批量查询直播状态超时")
+            return {}
+        except Exception as e:
+            logger.warn("BiliClient", f"批量查询直播状态失败: {e}")
+            return {}
+
+        if response.status_code != 200:
+            logger.warn("BiliClient", f"批量查询直播状态失败: HTTP {response.status_code}")
+            return {}
+
+        try:
+            data = response.json()
+            if data.get("code") == 0 and data.get("data"):
+                result = {}
+                for uid_str, info in data["data"].items():
+                    uid = int(uid_str)
+                    result[uid] = LiveRoomInfo(**info)
+                return result
+            else:
+                logger.warn("BiliClient", f"批量查询直播状态失败: {data.get('message')}")
+        except Exception as e:
+            logger.warn("BiliClient", f"解析直播状态响应失败: {e}")
+        return {}
+
+    async def get_live_room_by_mid(self, mid: int) -> "LiveRoomOldInfo | None":
+        """
+        获取用户对应的直播间状态
+        API: https://api.live.bilibili.com/room/v1/Room/getRoomInfoOld
+        """
+        from .models import LiveRoomOldInfo
+
+        url = "https://api.live.bilibili.com/room/v1/Room/getRoomInfoOld"
+        params = {"mid": mid}
+
+        try:
+            response = await self.client.get(url, params=params)
+        except httpx.TimeoutException:
+            logger.warn("BiliClient", f"获取用户 {mid} 直播间状态超时")
+            return None
+        except Exception as e:
+            logger.warn("BiliClient", f"获取用户 {mid} 直播间状态失败: {e}")
+            return None
+
+        if response.status_code != 200:
+            logger.warn("BiliClient", f"获取用户 {mid} 直播间状态失败: HTTP {response.status_code}")
+            return None
+
+        try:
+            data = response.json()
+            if data.get("code") == 0 and data.get("data"):
+                return LiveRoomOldInfo(**data["data"])
+            else:
+                logger.warn("BiliClient", f"获取直播间状态失败: {data.get('message')}")
+        except Exception as e:
+            logger.warn("BiliClient", f"解析直播间状态响应失败: {e}")
+        return None
+
     async def close(self):
         """关闭客户端"""
         await self.client.aclose()

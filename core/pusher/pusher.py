@@ -6,13 +6,14 @@ from .calendar_scheduler import CalendarScheduler
 from .weather_scheduler import WeatherScheduler
 from .bangumi_scheduler import BangumiScheduler
 from .bilibili_scheduler import BilibiliScheduler
+from .live_scheduler import LiveScheduler
 
 
 class Pusher:
     def __init__(self, client, handler):
         self._client = client
         self._handler = handler
-        self._pushers: List[WeatherScheduler | BangumiScheduler | BilibiliScheduler | CalendarScheduler | None] = []
+        self._pushers: List[WeatherScheduler | BangumiScheduler | BilibiliScheduler | CalendarScheduler | LiveScheduler | None] = []
 
     def start(self):
         # 1. 实例化推送器
@@ -20,18 +21,21 @@ class Pusher:
         bangumi_push = BangumiScheduler(self._client)
         bilibili_push = BilibiliScheduler(self._client)
         calendar_push = CalendarScheduler(self._client)
-        
+        live_push = LiveScheduler(self._client)
+
         # 2. 启动协程
         weather_push.start()
         bangumi_push.start()
         bilibili_push.start()
         calendar_push.start()
-        
+        live_push.start()
+
         self._pushers.append(weather_push)
         self._pushers.append(bangumi_push)
         self._pushers.append(bilibili_push)
         self._pushers.append(calendar_push)
-        
+        self._pushers.append(live_push)
+
         logger.info("Pusher", "Pusher Start")
 
     async def stop(self):
