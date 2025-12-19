@@ -43,7 +43,7 @@ class BiliClient:
 
         try:
             response = await self.client.get(url)
-        except httpx.Timeout:
+        except httpx.TimeoutException:
             logger.warn("BiliClient", "生成二维码超时")
             return None
         except Exception as e:
@@ -80,7 +80,7 @@ class BiliClient:
 
         try:
             response = await self.client.get(url, params=params)
-        except httpx.Timeout:
+        except httpx.TimeoutException:
             logger.warn("BiliClient", "轮询二维码超时")
             return None
         except Exception as e:
@@ -213,7 +213,7 @@ class BiliClient:
 
         try:
             response = await self.client.get(url, params=params, cookies=cookie_dict)
-        except httpx.Timeout:
+        except httpx.TimeoutException:
             logger.warn("BiliClient", f"获取UP主 {host_mid} 动态超时")
             return None
         except Exception as e:
@@ -257,7 +257,7 @@ class BiliClient:
 
         try:
             response = await self.client.get(url, params=params)
-        except httpx.Timeout:
+        except httpx.TimeoutException:
             logger.warn("BiliClient", f"获取视频 {bvid or aid} 信息超时")
             return None
         except Exception as e:
@@ -291,7 +291,7 @@ class BiliClient:
 
         try:
             response = await self.client.get(url, params=params)
-        except httpx.Timeout:
+        except httpx.TimeoutException:
             logger.warn("BiliClient", f"获取用户 {mid} 信息超时")
             return None
         except Exception as e:
@@ -324,7 +324,7 @@ class BiliClient:
 
         try:
             response = await self.client.get(url, params=params, cookies=cookie_dict)
-        except httpx.Timeout:
+        except httpx.TimeoutException:
             logger.warn("BiliClient", f"获取动态 {dynamic_id} 详情超时")
             return None
         except Exception as e:
