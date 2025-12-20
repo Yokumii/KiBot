@@ -78,7 +78,7 @@ class DynamicArchive(BaseModel):
 # === 图文内容 ===
 
 class DrawItem(BaseModel):
-    """图片项"""
+    """图片项（旧版 MAJOR_TYPE_DRAW）"""
     src: str = ""       # 图片 URL
     width: int = 0
     height: int = 0
@@ -88,11 +88,53 @@ class DrawItem(BaseModel):
 
 
 class DynamicDraw(BaseModel):
-    """图文动态内容"""
+    """图文动态内容（旧版 MAJOR_TYPE_DRAW）"""
     items: List[DrawItem] = Field(default_factory=list)
 
     class Config:
         extra = "ignore"
+
+
+# === Opus 内容（新版图文动态） ===
+
+class OpusPic(BaseModel):
+    """Opus 图片项"""
+    url: str = ""       # 图片 URL
+    width: int = 0
+    height: int = 0
+
+    class Config:
+        extra = "ignore"
+
+
+class OpusSummary(BaseModel):
+    """Opus 摘要"""
+    text: str = ""
+    rich_text_nodes: List[Any] = Field(default_factory=list)
+
+    class Config:
+        extra = "ignore"
+
+
+class DynamicOpus(BaseModel):
+    """Opus 内容（新版图文动态，MAJOR_TYPE_OPUS）"""
+    pics: List[OpusPic] = Field(default_factory=list)
+    summary: Optional[OpusSummary] = None
+    title: Optional[str] = None
+    jump_url: str = ""
+
+    class Config:
+        extra = "ignore"
+
+    @property
+    def text(self) -> str:
+        """获取摘要文本"""
+        return self.summary.text if self.summary else ""
+
+    @property
+    def images(self) -> List[str]:
+        """获取图片 URL 列表"""
+        return [pic.url for pic in self.pics if pic.url]
 
 
 # === 专栏内容 ===
@@ -187,6 +229,7 @@ class DynamicMajor(BaseModel):
     type: str = ""
     archive: Optional[DynamicArchive] = None
     draw: Optional[DynamicDraw] = None
+    opus: Optional[DynamicOpus] = None          # 新版图文动态（MAJOR_TYPE_OPUS）
     article: Optional[DynamicArticle] = None
     music: Optional[DynamicMusic] = None
     common: Optional[DynamicCommon] = None
