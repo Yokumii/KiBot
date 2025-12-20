@@ -53,9 +53,14 @@ class NapCatHttpClient:
             "group_id": group_id,
             "message": segments
         }
-        Logger.info("Message segments sent", f"group={group_id}, segments_count={len(segments)}")
         resp = await self._client.post(api, json=payload)
-        return resp.json()
+        resp.raise_for_status()
+        data = resp.json()
+        # 检查 NapCat 返回的状态码
+        if data.get("retcode") != 0:
+            raise RuntimeError(f"send_group_msg failed: {data.get('message', data)}")
+        Logger.info("Message segments sent", f"group={group_id}, segments_count={len(segments)}")
+        return data
 
     async def send_group_image_msg(self, group_id: int, img_path: str):
         abs_img_path = os.path.abspath(img_path)
