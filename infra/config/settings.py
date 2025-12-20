@@ -8,6 +8,10 @@ class Settings(BaseSettings):
         env_file=".env"
     )
 
+    # 日志配置
+    LOG_LEVEL: Literal["DEBUG", "INFO", "WARN", "ERROR"] = "INFO"
+    LOG_FILE: str = ""  # 日志文件路径，为空则不输出到文件
+
     # 连接模式: webhook 或 websocket
     CONNECTION_MODE: Literal["webhook", "websocket"] = "webhook"
 

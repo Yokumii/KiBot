@@ -5,12 +5,19 @@ KiBot 主入口文件
 """
 import asyncio
 
-from core.bot_core import Bot
+from infra.config.settings import Settings
 from infra.logger import Logger
 
 
 async def main():
     """主函数：初始化 Bot 并启动服务"""
+    # 加载配置并初始化日志系统
+    settings = Settings()
+    Logger.configure(level=settings.LOG_LEVEL, log_file=settings.LOG_FILE)
+
+    # 延迟导入，确保日志系统已配置
+    from core.bot_core import Bot
+
     # 创建 Bot 实例
     bot = Bot.create()
 
@@ -29,3 +36,5 @@ if __name__ == "__main__":
     except Exception as e:
         Logger.error("Main", f"Unexpected error: {e}")
         raise
+    finally:
+        Logger.close()
