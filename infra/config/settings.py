@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -6,8 +8,15 @@ class Settings(BaseSettings):
         env_file=".env"
     )
 
+    # 日志配置
+    LOG_LEVEL: Literal["DEBUG", "INFO", "WARN", "ERROR"] = "INFO"
+    LOG_FILE: str = ""  # 日志文件路径，为空则不输出到文件
+
+    # 连接模式: webhook 或 websocket
+    CONNECTION_MODE: Literal["webhook", "websocket"] = "webhook"
+
     # NapCat 网络配置
-    # WebSocket 配置（已废弃，保留用于兼容）
+    # WebSocket 配置
     NAPCAT_WS: str = "ws://127.0.0.1:3001"
     NAPCAT_WS_AUTH_TOKEN: str = "<Token>"
 
