@@ -103,16 +103,21 @@ class BilibiliScheduler:
         """检查UP主是否有新动态，返回渲染后的内容列表"""
         try:
             current_baseline = self.update_baselines.get(up_uid, "")
+            logger.debug("BilibiliScheduler", f"UP主 {up_uid} 当前baseline: {current_baseline}")
 
             dynamics = await self.service.get_user_dynamics(int(up_uid))
             if not dynamics or not dynamics.data or not dynamics.data.items:
+                logger.debug("BilibiliScheduler", f"UP主 {up_uid} 获取动态为空")
                 return []
+
+            logger.debug("BilibiliScheduler", f"UP主 {up_uid} 获取到 {len(dynamics.data.items)} 条动态")
 
             rendered_contents = []
 
             for dynamic in dynamics.data.items:
                 # 检查是否为新动态
                 if dynamic.id_str == current_baseline:
+                    logger.debug("BilibiliScheduler", f"UP主 {up_uid} 已到达baseline，停止检查")
                     break
 
                 # 使用渲染器渲染动态内容
@@ -122,6 +127,8 @@ class BilibiliScheduler:
             # 更新 baseline 为最新动态 ID
             if dynamics.data.items:
                 new_baseline = dynamics.data.items[0].id_str
+                if new_baseline != current_baseline:
+                    logger.debug("BilibiliScheduler", f"UP主 {up_uid} 更新baseline: {current_baseline} -> {new_baseline}")
                 self.update_baselines[up_uid] = new_baseline
                 self.save_update_baselines()
 
@@ -155,6 +162,12 @@ class BilibiliScheduler:
         for group_ups in self.subscriptions.values():
             all_ups.update(group_ups)
 
+        if not all_ups:
+            logger.info("BilibiliScheduler", "没有订阅任何UP主，跳过检查")
+            return
+
+        logger.info("BilibiliScheduler", f"开始检查 {len(all_ups)} 位UP主的动态")
+
         for up_uid in all_ups:
             try:
                 new_contents = await self.check_new_dynamics(up_uid)
@@ -165,6 +178,8 @@ class BilibiliScheduler:
                         if up_uid in subscribed_ups:
                             for content in new_contents:
                                 await self._send_rendered_content(int(group_id), content)
+                else:
+                    logger.debug("BilibiliScheduler", f"UP主 {up_uid} 暂无新动态")
 
             except Exception as e:
                 logger.warn("BilibiliScheduler", f"处理UP主 {up_uid} 动态时出错: {e}")
